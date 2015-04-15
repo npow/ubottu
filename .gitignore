@@ -1,3 +1,4 @@
 blobs/
 data/
 embeddings/
+*.class
