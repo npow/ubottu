@@ -2,3 +2,6 @@ blobs/
 data/
 embeddings/
 *.class
+*.pkl
+*.pyc
+.ipynb_checkpoints/

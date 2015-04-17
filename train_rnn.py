@@ -17,9 +17,15 @@ from TripleTextFile import TripleTextFile
 
 sys.setrecursionlimit(10000)
 
-TRAIN_FILE = 'data/trainset.csv_rand'
-VAL_FILE = 'data/valset.csv'
-TEST_FILE = 'data/testset.csv'
+TRAIN_FILE = 'data/trainset.csv_rand.rand.pkl'
+VAL_FILE = 'data/valset.csv.rand.pkl'
+TEST_FILE = 'data/testset.csv.rand.pkl'
+
+TRAIN_DATA = joblib.load(TRAIN_FILE)
+VAL_DATA = joblib.load(VAL_FILE)
+TEST_DATA = joblib.load(TEST_FILE)
+
+print "Done loading"
 
 EN_DICT = joblib.load('embeddings/turian/vocab-50.pkl')
 EMBEDDINGS = joblib.load('embeddings/turian/embeddings-50.pkl').astype(theano.config.floatX)
@@ -80,33 +86,18 @@ class RNN(object):
         self.train = theano.function(inputs=[x1_idxs, x2_idxs, y], outputs=[cost, e_x1, e_x2], updates=updates)
         self.predict = theano.function(inputs=[x1_idxs, x2_idxs], outputs=o)
 
-def tokenize(line):
-    tokens = nltk.tokenize.word_tokenize(line)
-    return tokens
-
-def process_line(line):
-    context, response, y = line['Context'], line['Response'], line['Correct']
-    context = context.replace('</s>', '')
-
-    # map words to indices in lookup table
-    x1 = [EN_DICT.get(word, EN_DICT[UNK_TOKEN]) for word in tokenize(context)]
-    x2 = [EN_DICT.get(word, EN_DICT[UNK_TOKEN]) for word in tokenize(response)]
-    y = int(y)
-
-    if len(x1) == 0 or len(x2) == 0:
-        return None, None, None
-
-    return np.array(x1, dtype='int32'), np.array(x2, dtype='int32'), y
-
-def test_model(rnn, fname, dictionary):
+def test_model(rnn, dataset):
     Y_pred = []
     Y_test = []
-    for i,line in enumerate(csv.DictReader(open(fname))):
-        X1, X2, Y = process_line(line)
+    for i,line in enumerate(dataset):
+        X1, X2, Y = line[:3]
         if i % 1000 == 0:
-            print "testing: %s, iter: %d" % (fname, i)
-        if X1 is None or X2 is None:
+            print "testing: %d" % i
+        X1 = np.array(X1, dtype=np.int32)
+        X2 = np.array(X2, dtype=np.int32)
+        if X1.shape[1] == 0 or X2.shape[1] == 0:
             continue
+
         p = rnn.predict(X1.reshape((1,-1)), X2.reshape((1,-1)))
         Y_pred.append(0 if p < 0.5 else 1)
         Y = [1,0][Y]
@@ -118,24 +109,23 @@ def test_model(rnn, fname, dictionary):
 def main():
     rnn = RNN(nh=HIDDEN_SIZE, ne=VOCAB_SIZE, de=EMBEDDING_SIZE)
 #    rnn = joblib.load('blobs/rnn.pkl')
-    test_model(rnn, TRAIN_FILE, EN_DICT)
+    test_model(rnn, TRAIN_DATA)
     for e in xrange(NUM_EPOCHS):
         total_cost = 0
-        count = 0
-        for line in csv.DictReader(open(fname)):
-            count += 1
-            X1, X2, Y = process_line(line)
-            if X1 is None or X2 is None:
+        for i,line in enumerate(TRAIN_DATA):
+            X1, X2, Y = line[:3]
+            X1 = np.array(X1, dtype=np.int32)
+            X2 = np.array(X2, dtype=np.int32)
+            if X1.shape[1] == 0 or X2.shape[1] == 0:
                 continue
             Y = [1,0][Y]
             cost, e_x1, e_x2 = rnn.train(X1.reshape((1,-1)), X2.reshape((1,-1)), Y)
             total_cost += cost
-            count += 1
-        print "epoch: ", e, " avg cost: ", (total_cost / count)
+        print "epoch: ", e, " avg cost: ", (total_cost / i)
         print "******************* TRAIN"
-        test_model(rnn, TRAIN_FILE, EN_DICT)
+        test_model(rnn, TRAIN_DATA)
         print "******************* TEST"
-        test_model(rnn, VAL_FILE, EN_DICT, NUM_VAL)
+        test_model(rnn, VAL_DATA)
         print "\n\n\n"
         joblib.dump(rnn, 'blobs/rnn.pkl')
 
