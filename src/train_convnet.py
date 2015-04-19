@@ -1,6 +1,7 @@
 import cPickle
 import lasagne
 import numpy as np
+import pyprind
 import re
 import sys
 import theano
@@ -22,7 +23,6 @@ class CNN(object):
         self.data = data
         self.batch_size = batch_size
         img_h = data['train']['r'].shape[1]
-        print img_h
         conv_layers = []
         for filter_size in filter_sizes:
             l_in = lasagne.layers.InputLayer(shape=(None, 1, img_h, img_w))
@@ -79,32 +79,38 @@ class CNN(object):
         self.val_set_c = theano.shared(data['val']['c'], borrow=True)
         self.val_set_r = theano.shared(data['val']['r'], borrow=True)
         self.val_set_y = theano.shared(data['val']['y'], borrow=True)
+        self.test_set_c = theano.shared(data['test']['c'], borrow=True)
+        self.test_set_r = theano.shared(data['test']['r'], borrow=True)
+        self.test_set_y = theano.shared(data['test']['y'], borrow=True)
         
         probas = T.concatenate([(1-o).reshape((-1,1)), o.reshape((-1,1))], axis=1)
         pred = T.argmax(probas, axis=1)
-        errors = T.mean(T.neq(pred, y))
+        errors = T.sum(T.neq(pred, y))
         
         self.train_model = theano.function([index], cost, updates=updates,
               givens={
                 c: self.train_set_c[index*batch_size:(index+1)*batch_size],
                 r: self.train_set_r[index*batch_size:(index+1)*batch_size],
                 y: self.train_set_y[index*batch_size:(index+1)*batch_size]})         
+
+        self.train_loss = theano.function([index], errors,
+                 givens={
+                    c: self.train_set_c[index * batch_size: (index + 1) * batch_size],
+                    r: self.train_set_r[index * batch_size: (index + 1) * batch_size],
+                    y: self.train_set_y[index * batch_size: (index + 1) * batch_size]})
         
-        self.val_model = theano.function([index], errors,
+        self.val_loss = theano.function([index], errors,
              givens={
                 c: self.val_set_c[index * batch_size: (index + 1) * batch_size],
                 r: self.val_set_r[index * batch_size: (index + 1) * batch_size],
                 y: self.val_set_y[index * batch_size: (index + 1) * batch_size]})
 
-        self.test_model = theano.function([index], errors,
-                 givens={
-                    c: self.train_set_c[index * batch_size: (index + 1) * batch_size],
-                    r: self.train_set_r[index * batch_size: (index + 1) * batch_size],
-                    y: self.train_set_y[index * batch_size: (index + 1) * batch_size]})    
+        self.test_loss = theano.function([index], errors,
+             givens={
+                c: self.test_set_c[index * batch_size: (index + 1) * batch_size],
+                r: self.test_set_r[index * batch_size: (index + 1) * batch_size],
+                y: self.test_set_y[index * batch_size: (index + 1) * batch_size]})
 
-        test_error = T.mean(T.neq(pred, y))
-        self.test_model_all = theano.function([c, r, y], test_error)   
-    
     def train(self, n_epochs=100, shuffle_batch=True):
         epoch = 0
         best_val_perf = 0
@@ -114,25 +120,28 @@ class CNN(object):
         
         n_train_batches = self.data['train']['y'].shape[0] // self.batch_size
         n_val_batches = self.data['val']['y'].shape[0] // self.batch_size
+        n_test_batches = self.data['test']['y'].shape[0] // (self.batch_size // 2)
         
-        test_set_c, test_set_r, test_set_y = self.data['test']['c'], self.data['test']['r'], self.data['test']['y']
         while (epoch < n_epochs):
             epoch += 1
             indices = range(n_train_batches)
             if shuffle_batch:
                 indices = np.random.permutation(indices)
+            bar = pyprind.ProgBar(len(indices), monitor=True)
             for minibatch_index in indices:
                 cost_epoch = self.train_model(minibatch_index)
                 self.set_zero(self.zero_vec)
-            train_losses = [self.test_model(i) for i in xrange(n_train_batches)]
-            train_perf = 1 - np.mean(train_losses)
-            val_losses = [self.val_model(i) for i in xrange(n_val_batches)]
-            val_perf = 1 - np.mean(val_losses)                        
+                bar.update()
+            train_losses = [self.train_loss(i) for i in xrange(n_train_batches)]
+            train_perf = 1 - np.sum(train_losses) / self.data['train']['y'].shape[0]
+            val_losses = [self.val_loss(i) for i in xrange(n_val_batches)]
+            val_perf = 1 - np.sum(val_losses) / self.data['val']['y'].shape[0]
             print 'epoch %i, train perf %f %%, val perf %f' % (epoch, train_perf * 100., val_perf*100.)
             if val_perf >= best_val_perf:
                 best_val_perf = val_perf
-#                test_loss = self.test_model_all(test_set_c, test_set_r, test_set_y)        
-#                test_perf = 1 - test_loss         
+                test_losses = [self.test_loss(i) for i in xrange(n_test_batches)]
+                test_perf = 1 - np.sum(test_losses) / self.data['test']['y'].shape[0]
+                print 'test_perf: ', test_perf
         return test_perf
 
 def as_floatX(variable):
@@ -218,7 +227,7 @@ def main():
               img_w=300,
               filter_sizes=[3,4,5],
               num_filters=100,
-              batch_size=64,
+              batch_size=512,
               lr_decay=0.95,
               sqr_norm_lim=9,
               non_static=True)
