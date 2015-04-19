@@ -1,3 +1,4 @@
+from __future__ import division
 import cPickle
 import lasagne
 import numpy as np
@@ -120,8 +121,8 @@ class CNN(object):
         
         n_train_batches = self.data['train']['y'].shape[0] // self.batch_size
         n_val_batches = self.data['val']['y'].shape[0] // self.batch_size
-        n_test_batches = self.data['test']['y'].shape[0] // (self.batch_size // 2)
-        
+        n_test_batches = self.data['test']['y'].shape[0] // self.batch_size
+
         while (epoch < n_epochs):
             epoch += 1
             indices = range(n_train_batches)
@@ -136,12 +137,12 @@ class CNN(object):
             train_perf = 1 - np.sum(train_losses) / self.data['train']['y'].shape[0]
             val_losses = [self.val_loss(i) for i in xrange(n_val_batches)]
             val_perf = 1 - np.sum(val_losses) / self.data['val']['y'].shape[0]
-            print 'epoch %i, train perf %f %%, val perf %f' % (epoch, train_perf * 100., val_perf*100.)
+            print 'epoch %i, train_perf %f, val_perf %f' % (epoch, train_perf*100, val_perf*100)
             if val_perf >= best_val_perf:
                 best_val_perf = val_perf
                 test_losses = [self.test_loss(i) for i in xrange(n_test_batches)]
                 test_perf = 1 - np.sum(test_losses) / self.data['test']['y'].shape[0]
-                print 'test_perf: ', test_perf
+                print 'test_perf %f' % (test_perf*100)
         return test_perf
 
 def as_floatX(variable):
@@ -227,7 +228,7 @@ def main():
               img_w=300,
               filter_sizes=[3,4,5],
               num_filters=100,
-              batch_size=512,
+              batch_size=256,
               lr_decay=0.95,
               sqr_norm_lim=9,
               non_static=True)
