@@ -40,9 +40,10 @@ class CNN(object):
             conv_layers.append(pool_layer)
             
         hidden_size = len(conv_layers) * num_filters
+        hidden_size = num_filters
         l_hidden1 = lasagne.layers.ConcatLayer(conv_layers)
         l_hidden2 = lasagne.layers.DenseLayer(l_hidden1, num_units=hidden_size, nonlinearity=lasagne.nonlinearities.tanh)
-        l_hidden2 = lasagne.layers.DropoutLayer(l_hidden2, 0.5)
+#        l_hidden2 = lasagne.layers.DropoutLayer(l_hidden2, 0.5)
         #self.M = theano.shared(np.random.randn(hidden_size, hidden_size).astype(theano.config.floatX))
         self.M = theano.shared(np.eye(hidden_size).astype(theano.config.floatX))
 
@@ -61,9 +62,8 @@ class CNN(object):
         e_context = l_hidden2.get_output(c_input, deterministic=True)
         e_response = l_hidden2.get_output(r_input, deterministic=True)
 
-        o = T.nnet.sigmoid(T.batched_dot(T.dot(e_context, self.M), e_response))
+        o = T.nnet.sigmoid(T.batched_dot(e_context, T.dot(e_response, self.M.T)))
         o = T.clip(o, 1e-7, 1.0-1e-7)
-#        o = pp('o')(o)
 
         cost = T.nnet.binary_crossentropy(o, y).mean()
         params = lasagne.layers.get_all_params(l_hidden2) + [self.M]
@@ -71,6 +71,7 @@ class CNN(object):
             params += [embeddings]
         #updates = lasagne.updates.adadelta(cost, params, learning_rate=1.0, rho=lr_decay)
         updates = sgd_updates_adadelta(cost, params, lr_decay, 1e-6, sqr_norm_lim)
+#        updates = lasagne.updates.adagrad(cost, params, learning_rate=0.01)
         
         self.train_set_c = theano.shared(data['train']['c'], borrow=True)
         self.train_set_r = theano.shared(data['train']['r'], borrow=True)
@@ -79,9 +80,9 @@ class CNN(object):
         self.val_set_r = theano.shared(data['val']['r'], borrow=True)
         self.val_set_y = theano.shared(data['val']['y'], borrow=True)
         
-        probas = T.concatenate([o.reshape((-1,1)), (1-o).reshape((-1,1))], axis=1)        
+        probas = T.concatenate([(1-o).reshape((-1,1)), o.reshape((-1,1))], axis=1)
         pred = T.argmax(probas, axis=1)
-        errors = T.mean(T.neq(pred, y), dtype=theano.config.floatX)
+        errors = T.mean(T.neq(pred, y))
         
         self.train_model = theano.function([index], cost, updates=updates,
               givens={
