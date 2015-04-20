@@ -52,7 +52,7 @@ class CNN(object):
         c = T.imatrix('c')
         r = T.imatrix('r')
         y = T.ivector('y')
-        embeddings = theano.shared(U, name='embeddings')
+        embeddings = theano.shared(U, name='embeddings', borrow=True)
         zero_vec_tensor = T.fvector()
         self.zero_vec = np.zeros(img_w, dtype=theano.config.floatX)
         self.set_zero = theano.function([zero_vec_tensor], updates=[(embeddings, T.set_subtensor(embeddings[0,:], zero_vec_tensor))])
