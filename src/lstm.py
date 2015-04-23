@@ -10,7 +10,7 @@ import theano.tensor as T
 from collections import defaultdict, OrderedDict
 from theano.printing import Print as pp
 
-class RNN(object):
+class LSTM(object):
     def __init__(self,
                  data,
                  U,
@@ -24,11 +24,25 @@ class RNN(object):
         self.batch_size = batch_size
         img_h = data['train']['r'].shape[1]
 
-        l_in = lasagne.layers.InputLayer(shape=(batch_size, img_h, img_w))
-        l_recurrent = lasagne.layers.RecurrentLayer(l_in, hidden_size, nonlinearity=lasagne.nonlinearities.tanh)
-        #l_reshape = lasagne.layers.ReshapeLayer(l_recurrent, (batch_size*img_h, hidden_size))
-        #self.M = theano.shared(np.random.randn(hidden_size, hidden_size).astype(theano.config.floatX))
-        self.M = theano.shared(np.eye(hidden_size).astype(theano.config.floatX))
+        l_in = lasagne.layers.InputLayer(shape=(batch_size, img_h, img_w))      
+        l_fwd = lasagne.layers.LSTMLayer(l_in,
+            hidden_size,
+            backwards=False,
+            learn_init=True,
+            peepholes=True
+            )
+        l_bck = lasagne.layers.LSTMLayer(
+            l_in,
+            hidden_size,
+            backwards=True,
+            learn_init=True,
+            peepholes=True
+            )
+        l_fwd_reshape = lasagne.layers.ReshapeLayer(l_fwd, (batch_size*img_h, hidden_size))
+        l_bck_reshape = lasagne.layers.ReshapeLayer(l_bck, (batch_size*img_h, hidden_size))
+        l_concat = lasagne.layers.ConcatLayer([l_fwd_reshape, l_bck_reshape], axis=1)
+
+        self.M = theano.shared(np.eye(2*hidden_size).astype(theano.config.floatX))
 
         index = T.iscalar()
         c = T.imatrix('c')
@@ -42,22 +56,23 @@ class RNN(object):
         c_input = embeddings[c.flatten()].reshape((c.shape[0], c.shape[1], embeddings.shape[1]))
         r_input = embeddings[r.flatten()].reshape((r.shape[0], r.shape[1], embeddings.shape[1]))
 
-        e_context = l_recurrent.get_output(c_input, deterministic=True)[:,-1,:].reshape((c.shape[0], -1))
-        e_response = l_recurrent.get_output(r_input, deterministic=True)[:,-1,:].reshape((r.shape[0], -1))
-
+        e_context = l_concat.get_output(c_input, deterministic=True).reshape((c.shape[0], img_h, 2*hidden_size))[:,-1,:]
+        e_response = l_concat.get_output(r_input, deterministic=True).reshape((r.shape[0], img_h, 2*hidden_size))[:,-1,:]
+        e_context = e_context.reshape((c.shape[0], -1))
+        e_response = e_response.reshape((r.shape[0], -1))
+        
         dp = T.batched_dot(e_context, T.dot(e_response, self.M.T))
         dp = pp('dp')(dp)
         o = T.nnet.sigmoid(dp)
         o = T.clip(o, 1e-7, 1.0-1e-7)
 
         cost = T.nnet.binary_crossentropy(o, y).mean()
-        params = lasagne.layers.get_all_params(l_recurrent) + [self.M]
-        print params
+        params = lasagne.layers.get_all_params(l_concat) + [self.M]
         if non_static:
             params += [embeddings]
 #        updates = lasagne.updates.adadelta(cost, params, learning_rate=1.0, rho=lr_decay)
-#        updates = sgd_updates_adadelta(cost, params, lr_decay, 1e-6, sqr_norm_lim)
-        updates = lasagne.updates.nesterov_momentum(cost, params, learning_rate=10.0)
+        updates = sgd_updates_adadelta(cost, params, lr_decay, 1e-6, sqr_norm_lim)
+#        updates = lasagne.updates.nesterov_momentum(cost, params, learning_rate=0.1)
         
         self.train_set_c = theano.shared(data['train']['c'], borrow=True)
         self.train_set_r = theano.shared(data['train']['r'], borrow=True)
@@ -114,11 +129,13 @@ class RNN(object):
             if shuffle_batch:
                 indices = np.random.permutation(indices)
             bar = pyprind.ProgBar(len(indices), monitor=True)
-            for minibatch_index in indices:
+            total_cost = 0
+            for minibatch_index in indices:                
                 cost_epoch = self.train_model(minibatch_index)
-                print cost_epoch
+                total_cost += cost_epoch
                 self.set_zero(self.zero_vec)
                 bar.update()
+            print "cost: ", (total_cost / len(indices))
             train_losses = [self.train_loss(i) for i in xrange(n_train_batches)]
             train_perf = 1 - np.sum(train_losses) / self.data['train']['y'].shape[0]
             val_losses = [self.val_loss(i) for i in xrange(n_val_batches)]
@@ -193,31 +210,27 @@ def make_idx_data(dataset, word_idx_map, max_l=152, k=300, filter_h=5):
     for col in ['c', 'r', 'y']:
         dataset[col] = np.array(dataset[col], dtype=np.int32)
 
-def main():
-    print "loading data...",
-    data = cPickle.load(open('data.pkl', 'rb'))
-    train_data, val_data, test_data, W, W2, word_idx_map, vocab = data
-    print "data loaded!"
+print "loading data...",
+data = cPickle.load(open('data.pkl', 'rb'))
+train_data, val_data, test_data, W, W2, word_idx_map, vocab = data
+print "data loaded!"
 
-    make_idx_data(train_data, word_idx_map, filter_h=1)
-    make_idx_data(val_data, word_idx_map, filter_h=1)
-    make_idx_data(test_data, word_idx_map, filter_h=1)
-    for key in ['c', 'r', 'y']:
-        print train_data[key].shape
-        print val_data[key].shape
-        print test_data[key].shape
+make_idx_data(train_data, word_idx_map, filter_h=1)
+make_idx_data(val_data, word_idx_map, filter_h=1)
+make_idx_data(test_data, word_idx_map, filter_h=1)
+for key in ['c', 'r', 'y']:
+    print train_data[key].shape
+    print val_data[key].shape
+    print test_data[key].shape
 
-    data = { 'train' : train_data, 'val': val_data, 'test': test_data }
+data = { 'train' : train_data, 'val': val_data, 'test': test_data }
 
-    rnn = RNN(data,
-              W.astype(theano.config.floatX),
-              img_w=300,
-              hidden_size=300,
-              batch_size=1,
-              lr_decay=0.95,
-              sqr_norm_lim=9,
-              non_static=True)
-    print rnn.train(n_epochs=100, shuffle_batch=True)
-
-if __name__ == '__main__':
-    main()
+rnn = LSTM(data,
+           W.astype(theano.config.floatX),
+           img_w=300,
+           hidden_size=100,
+           batch_size=256,
+           lr_decay=0.95,
+           sqr_norm_lim=1,
+           non_static=False)
+print rnn.train(n_epochs=100, shuffle_batch=True)
