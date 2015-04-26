@@ -1,5 +1,6 @@
 import cPickle
 import csv
+import nltk
 import os
 import re
 import sys
@@ -60,17 +61,10 @@ def clean_str(string, TREC=False):
     #string = re.sub(r"\?", " \? ", string) 
     #string = re.sub(r"\s{2,}", " ", string)    
     string = string.replace('</s>', '__EOS__')
-    return string.strip() if TREC else string.strip().lower()
+    return string.strip() #if TREC else string.strip().lower()
 
 def is_url(s):
     return s.startswith('http://') or s.startswith('https://') or s.startswith('ftp://') or s.startswith('ftps://') or s.startswith('smb://')
-    try:
-        val(s)
-        return True
-    except ValidationError:
-        return False
-    except ImportError:
-        return False
     
 def is_number(s):
   try:
@@ -79,7 +73,11 @@ def is_number(s):
   except ValueError:
     return False    
 
-def NER(word):
+def process_token(c, word):
+    nodelist = ['PERSON', 'ORGANIZATION', 'GPE', 'LOCATION', 'FACILITY', 'GSP']
+    if hasattr(c, 'label'):
+        if c.label() in nodelist:
+            return "__%s__" % c.label()
     if is_url(word):
         return "__URL__"
     elif is_number(word):
@@ -92,8 +90,9 @@ def process_line(s, clean_string=True):
     if clean_string:
         s = clean_str(s)
     tokens = tokenize(s)
-    tokens = [NER(token) for token in tokens]
-    return tokens
+    sent = nltk.pos_tag(tokens)
+    chunks = nltk.ne_chunk(sent, binary=False)
+    return [process_token(c,token).lower() for c,token in map(None, chunks, tokens)]
 
 vocab = Counter()
 data = process_file(INPUT_FILE, vocab)

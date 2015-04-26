@@ -50,7 +50,7 @@ def load_bin_vec(fname, vocab):
             while True:
                 ch = f.read(1)
                 if ch == ' ':
-                    word = ''.join(word)
+                    word = ''.join(word).lower()
                     break
                 if ch != '\n':
                     word.append(ch)   
@@ -68,7 +68,7 @@ def load_glove_vec(fname, vocab):
     with open(fname, "rb") as f:
         for i,line in enumerate(f):
             L = line.split()
-            word = L[0]
+            word = L[0].lower()
             if word in vocab:
                 word_vecs[word] = np.array(L[1:], dtype='float32')
     return word_vecs
