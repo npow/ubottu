@@ -9,7 +9,7 @@ import sys
 from collections import defaultdict
 from twokenize import tokenize
 
-TRAIN_FILE = '../data/trainset_small.csv'
+TRAIN_FILE = '../data/trainset_shuf.csv'
 VAL_FILE = '../data/valset.csv'
 TEST_FILE = '../data/testset.csv'
 
@@ -205,7 +205,7 @@ print "embeddings loaded!"
 print "num words with embeddings: ", len(embeddings)
 
 rand_vecs = {}
-add_unknown_words(rand_vecs, vocab, min_df=1)
+add_unknown_words(rand_vecs, vocab, min_df=10)
 W2, _ = get_W(rand_vecs, k=300)
 print "W2: ", W2.shape
 
