@@ -112,7 +112,7 @@ print "embeddings loaded!"
 print "num words with embeddings: ", len(embeddings)
 
 rand_vecs = {}
-add_unknown_words(rand_vecs, vocab, min_df=1)
+add_unknown_words(rand_vecs, vocab, min_df=10)
 W2, _ = get_W(rand_vecs, k=300)
 print "W2: ", W2.shape
 
@@ -120,6 +120,8 @@ add_unknown_words(embeddings, vocab, min_df=10)
 W, word_idx_map = get_W(embeddings, k=300)
 print "W: ", W.shape
 
-cPickle.dump([train_data, val_data, test_data, W, W2, word_idx_map, vocab], open("data.pkl", "wb"))
+cPickle.dump([train_data, val_data, test_data, word_idx_map, vocab], open("data.pkl", "wb"))
+cPickle.dump(W, open("W.pkl", "wb"))
+cPickle.dump(W2, open("W2.pkl", "wb"))
 print "dataset created!"
 
