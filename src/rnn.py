@@ -300,7 +300,7 @@ class RNN(object):
              },
              on_unused_input='warn')
 
-    def train(self, n_epochs=100, shuffle_batch=True):
+    def train(self, n_epochs=100, shuffle_batch=False):
         epoch = 0
         best_val_perf = 0
         val_perf = 0
@@ -417,9 +417,8 @@ def pad_to_batch_size(X, batch_size):
     return X_out
 
 print "loading data...",
-data = cPickle.load(open('data.pkl', 'rb'))
-W = cPickle.load(open('W.pkl', 'rb'))
-train_data, val_data, test_data, word_idx_map, vocab = data
+train_data, val_data, test_data = cPickle.load(open('dataset.pkl', 'rb'))
+W, word_idx_map = cPickle.load(open('W.pkl', 'rb'))
 print "data loaded!"
 
 for key in ['c_mask', 'r_mask', 'c_seqlen', 'r_seqlen']:
@@ -450,4 +449,4 @@ rnn = RNN(data,
           non_static=True,
           use_lstm=True,
           use_conv=True)
-print rnn.train(n_epochs=100, shuffle_batch=True)
+print rnn.train(n_epochs=100, shuffle_batch=False)

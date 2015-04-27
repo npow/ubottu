@@ -104,6 +104,9 @@ print "num val: ", len(val_data['y'])
 print "num test: ", len(test_data['y'])
 print "vocab size: ", len(vocab)
 
+cPickle.dump([train_data, val_data, test_data], open('dataset.pkl', 'wb'))
+del train_data, val_data, test_data
+
 print "loading embeddings..."
 #embeddings = load_bin_vec(W2V_FILE, vocab)
 embeddings = load_glove_vec(GLOVE_FILE, vocab)
@@ -111,17 +114,20 @@ embeddings = load_glove_vec(GLOVE_FILE, vocab)
 print "embeddings loaded!"
 print "num words with embeddings: ", len(embeddings)
 
+add_unknown_words(embeddings, vocab, min_df=10)
+W, word_idx_map = get_W(embeddings, k=300)
+print "W: ", W.shape
+cPickle.dump([W, word_idx_map], open("W.pkl", "wb"))
+del W
+
 rand_vecs = {}
 add_unknown_words(rand_vecs, vocab, min_df=10)
 W2, _ = get_W(rand_vecs, k=300)
 print "W2: ", W2.shape
+cPickle.dump([W2, word_idx_map], open("W2.pkl", "wb"))
+del W2
 
-add_unknown_words(embeddings, vocab, min_df=10)
-W, word_idx_map = get_W(embeddings, k=300)
-print "W: ", W.shape
+cPickle.dump(vocab, open('vocab.pkl', 'wb'))
+del vocab
 
-cPickle.dump([train_data, val_data, test_data, word_idx_map, vocab], open("data.pkl", "wb"))
-cPickle.dump(W, open("W.pkl", "wb"))
-cPickle.dump(W2, open("W2.pkl", "wb"))
 print "dataset created!"
-
