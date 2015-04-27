@@ -73,7 +73,7 @@ def load_glove_vec(fname, vocab):
                 word_vecs[word] = np.array(L[1:], dtype='float32')
     return word_vecs
 
-def add_unknown_words(word_vecs, vocab, min_df=1, k=300, unk_token='**UNKNOWN**'):
+def add_unknown_words(word_vecs, vocab, min_df=1, k=300, unk_token='**unknown**'):
     """
     For words that occur in at least min_df documents, create a separate word vector.    
     0.25 is chosen so the unknown vectors have (approximately) same variance as pre-trained ones

@@ -11,6 +11,8 @@ from collections import defaultdict, OrderedDict
 from theano.ifelse import ifelse
 from theano.printing import Print as pp
 
+UNK_TOKEN='**unknown**'
+
 class GradClip(theano.compile.ViewOp):
 
     def __init__(self, clip_lower_bound, clip_upper_bound):
@@ -381,6 +383,8 @@ def get_idx_from_sent(sent, word_idx_map, max_l, k):
     for word in words[:max_l]:
         if word in word_idx_map:
             x.append(word_idx_map[word])
+        else:
+            x.append(word_idx_map[UNK_TOKEN])
     while len(x) < max_l:
         x.append(0)
     mask = np.zeros(max_l, dtype=np.bool)
