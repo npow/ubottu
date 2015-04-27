@@ -90,6 +90,7 @@ def process_line(s, clean_string=True):
     if clean_string:
         s = clean_str(s)
     tokens = tokenize(s)
+    return [process_token(None,token).lower() for token in tokens]
     sent = nltk.pos_tag(tokens)
     chunks = nltk.ne_chunk(sent, binary=False)
     return [process_token(c,token).lower() for c,token in map(None, chunks, tokens)]
