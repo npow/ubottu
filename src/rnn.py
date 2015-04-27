@@ -418,7 +418,8 @@ def pad_to_batch_size(X, batch_size):
 
 print "loading data...",
 data = cPickle.load(open('data.pkl', 'rb'))
-train_data, val_data, test_data, W, W2, word_idx_map, vocab = data
+W = cPickle.load(open('W.pkl', 'rb'))
+train_data, val_data, test_data, word_idx_map, vocab = data
 print "data loaded!"
 
 for key in ['c_mask', 'r_mask', 'c_seqlen', 'r_seqlen']:
