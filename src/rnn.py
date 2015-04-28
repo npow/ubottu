@@ -11,8 +11,6 @@ from collections import defaultdict, OrderedDict
 from theano.ifelse import ifelse
 from theano.printing import Print as pp
 
-UNK_TOKEN='**unknown**'
-
 class GradClip(theano.compile.ViewOp):
 
     def __init__(self, clip_lower_bound, clip_upper_bound):
@@ -90,11 +88,11 @@ class RNN(object):
         index = T.iscalar()
         c = T.imatrix('c')
         r = T.imatrix('r')
-        y = T.ivector('y')
+        y = T.bvector('y')
 #        c_mask = T.bmatrix('c_mask')
 #        r_mask = T.bmatrix('r_mask')
-        c_seqlen = T.ivector('c_seqlen')
-        r_seqlen = T.ivector('r_seqlen')
+        c_seqlen = T.wvector('c_seqlen')
+        r_seqlen = T.wvector('r_seqlen')
         embeddings = theano.shared(U, name='embeddings', borrow=True)
         zero_vec_tensor = T.fvector()
         self.zero_vec = np.zeros(img_w, dtype=theano.config.floatX)
@@ -372,77 +370,14 @@ def sgd_updates_adadelta(cost, params, rho=0.95, epsilon=1e-6, norm_lim=9, word_
             updates[param] = stepped_param * scale
         else:
             updates[param] = stepped_param      
-    return updates 
- 
-def get_idx_from_sent(sent, word_idx_map, max_l, k):
-    """
-    Transforms sentence into a list of indices. Pad with zeroes.
-    """
-    x = []
-    words = sent.split()
-    for word in words[:max_l]:
-        if word in word_idx_map:
-            x.append(word_idx_map[word])
-        else:
-            x.append(word_idx_map[UNK_TOKEN])
-    while len(x) < max_l:
-        x.append(0)
-#    mask = np.zeros(max_l, dtype=np.bool)
-#    mask[:len(words)] = 1
-    return x, len(words) if len(words) < max_l-1 else max_l-1
-
-def make_idx_data(dataset, word_idx_map, max_l=152, k=300):
-    """
-    Transforms sentences into a 2-d matrix.
-    """
-    for i in xrange(len(dataset['y'])):
-        dataset['c'][i], dataset['c_seqlen'][i] = get_idx_from_sent(dataset['c'][i], word_idx_map, max_l, k)
-        dataset['r'][i], dataset['r_seqlen'][i] = get_idx_from_sent(dataset['r'][i], word_idx_map, max_l, k)
-    for col in ['c', 'r', 'y', 'c_seqlen', 'r_seqlen']:
-        dataset[col] = np.array(dataset[col], dtype=np.int32)
-#    for col in ['c_mask', 'r_mask']:
-#        dataset[col] = np.array(dataset[col], dtype=np.int8)
-
-def pad_to_batch_size(X, batch_size):
-    n_seqs = X.shape[0]
-    seq_length = X.shape[1] if X.ndim > 1 else None
-    n_batches_out = np.ceil(float(n_seqs) / batch_size)
-    n_seqs_out = batch_size * n_batches_out
-
-    if X.ndim > 1:
-        X_out = np.zeros((n_seqs_out, seq_length), dtype=X.dtype)
-    else:
-        X_out = np.zeros((n_seqs_out), dtype=X.dtype)        
-    X_out[:n_seqs, ] = X
-    to_pad = n_seqs % batch_size
-    if to_pad > 0:
-        X_out[n_seqs:] = X[:batch_size-to_pad]
-    
-    return X_out
+    return updates
 
 print "loading data...",
 train_data, val_data, test_data = cPickle.load(open('dataset.pkl', 'rb'))
 W, word_idx_map = cPickle.load(open('W.pkl', 'rb'))
 print "data loaded!"
 
-#for key in ['c_mask', 'r_mask', 'c_seqlen', 'r_seqlen']:
-for key in ['c_seqlen', 'r_seqlen']:
-    for dataset in [train_data, val_data, test_data]:
-        dataset[key] = [0] * len(dataset['y'])
-
-make_idx_data(train_data, word_idx_map)
-make_idx_data(val_data, word_idx_map)
-make_idx_data(test_data, word_idx_map)
-
 BATCH_SIZE = 256
-
-#for key in ['c', 'r', 'y', 'c_mask', 'r_mask', 'c_seqlen', 'r_seqlen']:
-for key in ['c', 'r', 'y', 'c_seqlen', 'r_seqlen']:
-    print key
-    for dataset in [train_data, val_data, test_data]:
-        dataset[key] = pad_to_batch_size(dataset[key], BATCH_SIZE)
-        print dataset[key].shape
-
 data = { 'train' : train_data, 'val': val_data, 'test': test_data }
 
 rnn = RNN(data,
@@ -455,4 +390,5 @@ rnn = RNN(data,
           non_static=True,
           use_lstm=True,
           use_conv=True)
+
 print rnn.train(n_epochs=100, shuffle_batch=False)
