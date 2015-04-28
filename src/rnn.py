@@ -91,8 +91,8 @@ class RNN(object):
         c = T.imatrix('c')
         r = T.imatrix('r')
         y = T.ivector('y')
-        c_mask = T.bmatrix('c_mask')
-        r_mask = T.bmatrix('r_mask')
+#        c_mask = T.bmatrix('c_mask')
+#        r_mask = T.bmatrix('r_mask')
         c_seqlen = T.ivector('c_seqlen')
         r_seqlen = T.ivector('r_seqlen')
         embeddings = theano.shared(U, name='embeddings', borrow=True)
@@ -206,8 +206,8 @@ class RNN(object):
             e_context = l_out.get_output(c_input, deterministic=False)
             e_response = l_out.get_output(r_input, deterministic=False)
         else:         
-            e_context = l_out.get_output(c_input, c_mask, deterministic=False)[T.arange(batch_size), c_seqlen].reshape((c.shape[0], hidden_size))   
-            e_response = l_out.get_output(r_input, r_mask, deterministic=False)[T.arange(batch_size), r_seqlen].reshape((r.shape[0], hidden_size))
+            e_context = l_out.get_output(c_input, deterministic=False)[T.arange(batch_size), c_seqlen].reshape((c.shape[0], hidden_size))   
+            e_response = l_out.get_output(r_input, deterministic=False)[T.arange(batch_size), r_seqlen].reshape((r.shape[0], hidden_size))
             
         dp = T.batched_dot(e_context, T.dot(e_response, self.M.T))
         #dp = pp('dp')(dp)
@@ -217,24 +217,24 @@ class RNN(object):
         self.train_set_c = theano.shared(data['train']['c'], borrow=True)
         self.train_set_r = theano.shared(data['train']['r'], borrow=True)
         self.train_set_y = theano.shared(data['train']['y'], borrow=True)
-        self.train_set_c_mask = theano.shared(data['train']['c_mask'], borrow=True)
-        self.train_set_r_mask = theano.shared(data['train']['r_mask'], borrow=True)
+#        self.train_set_c_mask = theano.shared(data['train']['c_mask'], borrow=True)
+#        self.train_set_r_mask = theano.shared(data['train']['r_mask'], borrow=True)
         self.train_set_c_seqlen = theano.shared(data['train']['c_seqlen'], borrow=True)
         self.train_set_r_seqlen = theano.shared(data['train']['r_seqlen'], borrow=True)        
         
         self.val_set_c = theano.shared(data['val']['c'], borrow=True)
         self.val_set_r = theano.shared(data['val']['r'], borrow=True)
         self.val_set_y = theano.shared(data['val']['y'], borrow=True)
-        self.val_set_c_mask = theano.shared(data['val']['c_mask'], borrow=True)
-        self.val_set_r_mask = theano.shared(data['val']['r_mask'], borrow=True)
+#        self.val_set_c_mask = theano.shared(data['val']['c_mask'], borrow=True)
+#        self.val_set_r_mask = theano.shared(data['val']['r_mask'], borrow=True)
         self.val_set_c_seqlen = theano.shared(data['val']['c_seqlen'], borrow=True)
         self.val_set_r_seqlen = theano.shared(data['val']['r_seqlen'], borrow=True)
         
         self.test_set_c = theano.shared(data['test']['c'], borrow=True)
         self.test_set_r = theano.shared(data['test']['r'], borrow=True)
         self.test_set_y = theano.shared(data['test']['y'], borrow=True)
-        self.test_set_c_mask = theano.shared(data['test']['c_mask'], borrow=True)
-        self.test_set_r_mask = theano.shared(data['test']['r_mask'], borrow=True)
+#        self.test_set_c_mask = theano.shared(data['test']['c_mask'], borrow=True)
+#        self.test_set_r_mask = theano.shared(data['test']['r_mask'], borrow=True)
         self.test_set_c_seqlen = theano.shared(data['test']['c_seqlen'], borrow=True)
         self.test_set_r_seqlen = theano.shared(data['test']['r_seqlen'], borrow=True)          
         
@@ -259,8 +259,8 @@ class RNN(object):
                 c: self.train_set_c[index*batch_size:(index+1)*batch_size],
                 r: self.train_set_r[index*batch_size:(index+1)*batch_size],
                 y: self.train_set_y[index*batch_size:(index+1)*batch_size],
-                c_mask: self.train_set_c_mask[index*batch_size:(index+1)*batch_size],
-                r_mask: self.train_set_r_mask[index*batch_size:(index+1)*batch_size],
+#                c_mask: self.train_set_c_mask[index*batch_size:(index+1)*batch_size],
+#                r_mask: self.train_set_r_mask[index*batch_size:(index+1)*batch_size],
                 c_seqlen: self.train_set_c_seqlen[index*batch_size:(index+1)*batch_size],
                 r_seqlen: self.train_set_r_seqlen[index*batch_size:(index+1)*batch_size],
               },
@@ -271,8 +271,8 @@ class RNN(object):
                     c: self.train_set_c[index * batch_size: (index + 1) * batch_size],
                     r: self.train_set_r[index * batch_size: (index + 1) * batch_size],
                     y: self.train_set_y[index * batch_size: (index + 1) * batch_size],
-                    c_mask: self.train_set_c_mask[index * batch_size: (index + 1) * batch_size],
-                    r_mask: self.train_set_r_mask[index * batch_size: (index + 1) * batch_size],
+#                    c_mask: self.train_set_c_mask[index * batch_size: (index + 1) * batch_size],
+#                    r_mask: self.train_set_r_mask[index * batch_size: (index + 1) * batch_size],
                     c_seqlen: self.train_set_c_seqlen[index * batch_size: (index + 1) * batch_size],
                     r_seqlen: self.train_set_r_seqlen[index * batch_size: (index + 1) * batch_size],
                  },
@@ -283,8 +283,8 @@ class RNN(object):
                 c: self.val_set_c[index * batch_size: (index + 1) * batch_size],
                 r: self.val_set_r[index * batch_size: (index + 1) * batch_size],
                 y: self.val_set_y[index * batch_size: (index + 1) * batch_size],
-                c_mask: self.val_set_c_mask[index * batch_size: (index + 1) * batch_size],
-                r_mask: self.val_set_r_mask[index * batch_size: (index + 1) * batch_size],
+#                c_mask: self.val_set_c_mask[index * batch_size: (index + 1) * batch_size],
+#                r_mask: self.val_set_r_mask[index * batch_size: (index + 1) * batch_size],
                 c_seqlen: self.val_set_c_seqlen[index * batch_size: (index + 1) * batch_size],
                 r_seqlen: self.val_set_r_seqlen[index * batch_size: (index + 1) * batch_size],
              },
@@ -295,8 +295,8 @@ class RNN(object):
                 c: self.test_set_c[index * batch_size: (index + 1) * batch_size],
                 r: self.test_set_r[index * batch_size: (index + 1) * batch_size],
                 y: self.test_set_y[index * batch_size: (index + 1) * batch_size],
-                c_mask: self.test_set_c_mask[index * batch_size: (index + 1) * batch_size],
-                r_mask: self.test_set_r_mask[index * batch_size: (index + 1) * batch_size],
+#                c_mask: self.test_set_c_mask[index * batch_size: (index + 1) * batch_size],
+#                r_mask: self.test_set_r_mask[index * batch_size: (index + 1) * batch_size],
                 c_seqlen: self.test_set_c_seqlen[index * batch_size: (index + 1) * batch_size],
                 r_seqlen: self.test_set_r_seqlen[index * batch_size: (index + 1) * batch_size],
              },
@@ -387,21 +387,21 @@ def get_idx_from_sent(sent, word_idx_map, max_l, k):
             x.append(word_idx_map[UNK_TOKEN])
     while len(x) < max_l:
         x.append(0)
-    mask = np.zeros(max_l, dtype=np.bool)
-    mask[:len(words)] = 1
-    return x, mask, len(words) if len(words) < max_l-1 else max_l-1
+#    mask = np.zeros(max_l, dtype=np.bool)
+#    mask[:len(words)] = 1
+    return x, len(words) if len(words) < max_l-1 else max_l-1
 
 def make_idx_data(dataset, word_idx_map, max_l=152, k=300):
     """
     Transforms sentences into a 2-d matrix.
     """
     for i in xrange(len(dataset['y'])):
-        dataset['c'][i], dataset['c_mask'][i], dataset['c_seqlen'][i] = get_idx_from_sent(dataset['c'][i], word_idx_map, max_l, k)
-        dataset['r'][i], dataset['r_mask'][i], dataset['r_seqlen'][i] = get_idx_from_sent(dataset['r'][i], word_idx_map, max_l, k)
+        dataset['c'][i], dataset['c_seqlen'][i] = get_idx_from_sent(dataset['c'][i], word_idx_map, max_l, k)
+        dataset['r'][i], dataset['r_seqlen'][i] = get_idx_from_sent(dataset['r'][i], word_idx_map, max_l, k)
     for col in ['c', 'r', 'y', 'c_seqlen', 'r_seqlen']:
         dataset[col] = np.array(dataset[col], dtype=np.int32)
-    for col in ['c_mask', 'r_mask']:
-        dataset[col] = np.array(dataset[col], dtype=np.int8)
+#    for col in ['c_mask', 'r_mask']:
+#        dataset[col] = np.array(dataset[col], dtype=np.int8)
 
 def pad_to_batch_size(X, batch_size):
     n_seqs = X.shape[0]
@@ -425,7 +425,8 @@ train_data, val_data, test_data = cPickle.load(open('dataset.pkl', 'rb'))
 W, word_idx_map = cPickle.load(open('W.pkl', 'rb'))
 print "data loaded!"
 
-for key in ['c_mask', 'r_mask', 'c_seqlen', 'r_seqlen']:
+#for key in ['c_mask', 'r_mask', 'c_seqlen', 'r_seqlen']:
+for key in ['c_seqlen', 'r_seqlen']:
     for dataset in [train_data, val_data, test_data]:
         dataset[key] = [0] * len(dataset['y'])
 
@@ -435,7 +436,8 @@ make_idx_data(test_data, word_idx_map)
 
 BATCH_SIZE = 256
 
-for key in ['c', 'r', 'y', 'c_mask', 'r_mask', 'c_seqlen', 'r_seqlen']:
+#for key in ['c', 'r', 'y', 'c_mask', 'r_mask', 'c_seqlen', 'r_seqlen']:
+for key in ['c', 'r', 'y', 'c_seqlen', 'r_seqlen']:
     print key
     for dataset in [train_data, val_data, test_data]:
         dataset[key] = pad_to_batch_size(dataset[key], BATCH_SIZE)
