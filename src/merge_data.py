@@ -114,7 +114,7 @@ def make_idx_data(dataset, word_idx_map, max_l=152, k=300):
         dataset[col] = np.array(dataset[col], dtype=np.int32)
     for col in ['c_seqlen', 'r_seqlen']:
         dataset[col] = np.array(dataset[col], dtype=np.int16)
-    dataset['y'] = np.array(dataset[col], dtype=np.bool)
+    dataset['y'] = np.array(dataset[col], dtype=np.int8)
 #    for col in ['c_mask', 'r_mask']:
 #        dataset[col] = np.array(dataset[col], dtype=np.int8)
 
