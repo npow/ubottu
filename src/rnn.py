@@ -11,6 +11,9 @@ from collections import defaultdict, OrderedDict
 from theano.ifelse import ifelse
 from theano.printing import Print as pp
 
+MAX_LEN = 160
+BATCH_SIZE = 256
+
 class GradClip(theano.compile.ViewOp):
 
     def __init__(self, clip_lower_bound, clip_upper_bound):
@@ -83,16 +86,16 @@ class RNN(object):
         self.data = data
         self.batch_size = batch_size
         
-        img_h = data['train']['r'].shape[1]
+        img_h = MAX_LEN
         
         index = T.iscalar()
         c = T.imatrix('c')
         r = T.imatrix('r')
-        y = T.bvector('y')
+        y = T.ivector('y')
 #        c_mask = T.bmatrix('c_mask')
 #        r_mask = T.bmatrix('r_mask')
-        c_seqlen = T.wvector('c_seqlen')
-        r_seqlen = T.wvector('r_seqlen')
+        c_seqlen = T.ivector('c_seqlen')
+        r_seqlen = T.ivector('r_seqlen')
         embeddings = theano.shared(U, name='embeddings', borrow=True)
         zero_vec_tensor = T.fvector()
         self.zero_vec = np.zeros(img_w, dtype=theano.config.floatX)
@@ -212,29 +215,11 @@ class RNN(object):
         o = T.nnet.sigmoid(dp)
         o = T.clip(o, 1e-7, 1.0-1e-7)
 
-        self.train_set_c = theano.shared(data['train']['c'], borrow=True)
-        self.train_set_r = theano.shared(data['train']['r'], borrow=True)
-        self.train_set_y = theano.shared(data['train']['y'], borrow=True)
-#        self.train_set_c_mask = theano.shared(data['train']['c_mask'], borrow=True)
-#        self.train_set_r_mask = theano.shared(data['train']['r_mask'], borrow=True)
-        self.train_set_c_seqlen = theano.shared(data['train']['c_seqlen'], borrow=True)
-        self.train_set_r_seqlen = theano.shared(data['train']['r_seqlen'], borrow=True)        
-        
-        self.val_set_c = theano.shared(data['val']['c'], borrow=True)
-        self.val_set_r = theano.shared(data['val']['r'], borrow=True)
-        self.val_set_y = theano.shared(data['val']['y'], borrow=True)
-#        self.val_set_c_mask = theano.shared(data['val']['c_mask'], borrow=True)
-#        self.val_set_r_mask = theano.shared(data['val']['r_mask'], borrow=True)
-        self.val_set_c_seqlen = theano.shared(data['val']['c_seqlen'], borrow=True)
-        self.val_set_r_seqlen = theano.shared(data['val']['r_seqlen'], borrow=True)
-        
-        self.test_set_c = theano.shared(data['test']['c'], borrow=True)
-        self.test_set_r = theano.shared(data['test']['r'], borrow=True)
-        self.test_set_y = theano.shared(data['test']['y'], borrow=True)
-#        self.test_set_c_mask = theano.shared(data['test']['c_mask'], borrow=True)
-#        self.test_set_r_mask = theano.shared(data['test']['r_mask'], borrow=True)
-        self.test_set_c_seqlen = theano.shared(data['test']['c_seqlen'], borrow=True)
-        self.test_set_r_seqlen = theano.shared(data['test']['r_seqlen'], borrow=True)          
+        self.shared_data = {}
+        for key in ['c', 'r']:
+            self.shared_data[key] = theano.shared(np.zeros((batch_size, MAX_LEN), dtype=np.int32))
+        for key in ['y', 'c_seqlen', 'r_seqlen']: 
+            self.shared_data[key] = theano.shared(np.zeros((batch_size,), dtype=np.int32))
         
         probas = T.concatenate([(1-o).reshape((-1,1)), o.reshape((-1,1))], axis=1)
         pred = T.argmax(probas, axis=1)
@@ -251,54 +236,40 @@ class RNN(object):
 #        updates = sgd_updates_adadelta(cost, params, lr_decay, 1e-6, sqr_norm_lim)
 #        updates = lasagne.updates.nesterov_momentum(cost, params, learning_rate=0.1)
         updates = adam(cost, params)
-                        
-        self.train_model = theano.function([index], cost, updates=updates,
-              givens={
-                c: self.train_set_c[index*batch_size:(index+1)*batch_size],
-                r: self.train_set_r[index*batch_size:(index+1)*batch_size],
-                y: self.train_set_y[index*batch_size:(index+1)*batch_size],
-#                c_mask: self.train_set_c_mask[index*batch_size:(index+1)*batch_size],
-#                r_mask: self.train_set_r_mask[index*batch_size:(index+1)*batch_size],
-                c_seqlen: self.train_set_c_seqlen[index*batch_size:(index+1)*batch_size],
-                r_seqlen: self.train_set_r_seqlen[index*batch_size:(index+1)*batch_size],
-              },
-              on_unused_input='warn')         
 
-        self.train_loss = theano.function([index], errors,
-                 givens={
-                    c: self.train_set_c[index * batch_size: (index + 1) * batch_size],
-                    r: self.train_set_r[index * batch_size: (index + 1) * batch_size],
-                    y: self.train_set_y[index * batch_size: (index + 1) * batch_size],
-#                    c_mask: self.train_set_c_mask[index * batch_size: (index + 1) * batch_size],
-#                    r_mask: self.train_set_r_mask[index * batch_size: (index + 1) * batch_size],
-                    c_seqlen: self.train_set_c_seqlen[index * batch_size: (index + 1) * batch_size],
-                    r_seqlen: self.train_set_r_seqlen[index * batch_size: (index + 1) * batch_size],
-                 },
-                 on_unused_input='warn')
-        
-        self.val_loss = theano.function([index], errors,
-             givens={
-                c: self.val_set_c[index * batch_size: (index + 1) * batch_size],
-                r: self.val_set_r[index * batch_size: (index + 1) * batch_size],
-                y: self.val_set_y[index * batch_size: (index + 1) * batch_size],
-#                c_mask: self.val_set_c_mask[index * batch_size: (index + 1) * batch_size],
-#                r_mask: self.val_set_r_mask[index * batch_size: (index + 1) * batch_size],
-                c_seqlen: self.val_set_c_seqlen[index * batch_size: (index + 1) * batch_size],
-                r_seqlen: self.val_set_r_seqlen[index * batch_size: (index + 1) * batch_size],
-             },
-             on_unused_input='warn')
+        givens = {
+            c: self.shared_data['c'],
+            r: self.shared_data['r'],
+            y: self.shared_data['y'],
+            c_seqlen: self.shared_data['c_seqlen'],
+            r_seqlen: self.shared_data['r_seqlen']
+        }
+        self.train_model = theano.function([], cost, updates=updates, givens=givens, on_unused_input='warn')         
+        self.get_loss = theano.function([], errors, givens=givens, on_unused_input='warn')
 
-        self.test_loss = theano.function([index], errors,
-             givens={
-                c: self.test_set_c[index * batch_size: (index + 1) * batch_size],
-                r: self.test_set_r[index * batch_size: (index + 1) * batch_size],
-                y: self.test_set_y[index * batch_size: (index + 1) * batch_size],
-#                c_mask: self.test_set_c_mask[index * batch_size: (index + 1) * batch_size],
-#                r_mask: self.test_set_r_mask[index * batch_size: (index + 1) * batch_size],
-                c_seqlen: self.test_set_c_seqlen[index * batch_size: (index + 1) * batch_size],
-                r_seqlen: self.test_set_r_seqlen[index * batch_size: (index + 1) * batch_size],
-             },
-             on_unused_input='warn')
+    def get_batch(self, dataset, index, max_l=MAX_LEN):
+        seqlen = np.zeros((self.batch_size,), dtype=np.int32)
+        batch = np.zeros((self.batch_size, max_l), dtype=np.int32)
+        data = dataset[index*self.batch_size:(index+1)*self.batch_size]
+        for i,row in enumerate(data):
+            row = row[:max_l]
+            batch[i,0:len(row)] = row
+            seqlen[i] = len(row)-1
+        return batch, seqlen
+    
+    def set_shared_variables(self, dataset, index):
+        c, c_seqlen = self.get_batch(dataset['c'], index)
+        r, r_seqlen = self.get_batch(dataset['r'], index)
+        y = np.array(dataset['y'][index*self.batch_size:(index+1)*self.batch_size], dtype=np.int32)
+        self.shared_data['c'].set_value(c)
+        self.shared_data['r'].set_value(r)
+        self.shared_data['y'].set_value(y)
+        self.shared_data['c_seqlen'].set_value(c_seqlen)
+        self.shared_data['r_seqlen'].set_value(r_seqlen)     
+
+    def compute_loss(self, dataset, index):
+        self.set_shared_variables(dataset, index)
+        return self.get_loss()
 
     def train(self, n_epochs=100, shuffle_batch=False):
         epoch = 0
@@ -307,9 +278,9 @@ class RNN(object):
         test_perf = 0
         cost_epoch = 0
         
-        n_train_batches = self.data['train']['y'].shape[0] // self.batch_size
-        n_val_batches = self.data['val']['y'].shape[0] // self.batch_size
-        n_test_batches = self.data['test']['y'].shape[0] // self.batch_size
+        n_train_batches = len(self.data['train']['y']) // self.batch_size
+        n_val_batches = len(self.data['val']['y']) // self.batch_size
+        n_test_batches = len(self.data['test']['y']) // self.batch_size
 
         while (epoch < n_epochs):
             epoch += 1
@@ -319,20 +290,21 @@ class RNN(object):
             bar = pyprind.ProgBar(len(indices), monitor=True)
             total_cost = 0
             for minibatch_index in indices:
-                cost_epoch = self.train_model(minibatch_index)
+                self.set_shared_variables(self.data['train'], minibatch_index)
+                cost_epoch = self.train_model()
                 total_cost += cost_epoch
                 self.set_zero(self.zero_vec)
                 bar.update()
             print "cost: ", (total_cost / len(indices))
-            train_losses = [self.train_loss(i) for i in xrange(n_train_batches)]
-            train_perf = 1 - np.sum(train_losses) / self.data['train']['y'].shape[0]
-            val_losses = [self.val_loss(i) for i in xrange(n_val_batches)]
-            val_perf = 1 - np.sum(val_losses) / self.data['val']['y'].shape[0]
+            train_losses = [self.compute_loss(self.data['train'], i) for i in xrange(n_train_batches)]
+            train_perf = 1 - np.sum(train_losses) / len(self.data['train']['y'])
+            val_losses = [self.compute_loss(self.data['val'], i) for i in xrange(n_val_batches)]
+            val_perf = 1 - np.sum(val_losses) / len(self.data['val']['y'])
             print 'epoch %i, train_perf %f, val_perf %f' % (epoch, train_perf*100, val_perf*100)
             if val_perf >= best_val_perf:
                 best_val_perf = val_perf
-                test_losses = [self.test_loss(i) for i in xrange(n_test_batches)]
-                test_perf = 1 - np.sum(test_losses) / self.data['test']['y'].shape[0]
+                test_losses = [self.compute_loss(self.data['test'], i) for i in xrange(n_test_batches)]
+                test_perf = 1 - np.sum(test_losses) / len(self.data['test']['y'])
                 print 'test_perf %f' % (test_perf*100)
         return test_perf
 
@@ -377,7 +349,6 @@ train_data, val_data, test_data = cPickle.load(open('dataset.pkl', 'rb'))
 W, word_idx_map = cPickle.load(open('W.pkl', 'rb'))
 print "data loaded!"
 
-BATCH_SIZE = 256
 data = { 'train' : train_data, 'val': val_data, 'test': test_data }
 
 rnn = RNN(data,
@@ -388,7 +359,8 @@ rnn = RNN(data,
           lr_decay=0.95,
           sqr_norm_lim=1,
           non_static=True,
-          use_lstm=True,
-          use_conv=True)
+          use_lstm=False,
+          use_conv=False)
 
 print rnn.train(n_epochs=100, shuffle_batch=False)
+

@@ -86,37 +86,26 @@ def add_unknown_words(word_vecs, vocab, min_df=1, k=300, unk_token='**unknown**'
             word_vecs[word] = uniform_sample(-0.25,0.25,k)  
     word_vecs[unk_token] = uniform_sample(-0.25,0.25,k)
 
-def get_idx_from_sent(sent, word_idx_map, max_l, k):
+def get_idx_from_sent(sent, word_idx_map, k):
     """
     Transforms sentence into a list of indices. Pad with zeroes.
     """
     x = []
     words = sent.split()
-    for word in words[:max_l]:
+    for word in words:
         if word in word_idx_map:
             x.append(word_idx_map[word])
         else:
             x.append(word_idx_map[UNK_TOKEN])
-    while len(x) < max_l:
-        x.append(0)
-#    mask = np.zeros(max_l, dtype=np.bool)
-#    mask[:len(words)] = 1
-    return x, len(words) if len(words) < max_l-1 else max_l-1
+    return x
 
-def make_idx_data(dataset, word_idx_map, max_l=152, k=300):
+def make_idx_data(dataset, word_idx_map, k=300):
     """
     Transforms sentences into a 2-d matrix.
     """
     for i in xrange(len(dataset['y'])):
-        dataset['c'][i], dataset['c_seqlen'][i] = get_idx_from_sent(dataset['c'][i], word_idx_map, max_l, k)
-        dataset['r'][i], dataset['r_seqlen'][i] = get_idx_from_sent(dataset['r'][i], word_idx_map, max_l, k)
-    for col in ['c', 'r']:
-        dataset[col] = np.array(dataset[col], dtype=np.int32)
-    for col in ['c_seqlen', 'r_seqlen']:
-        dataset[col] = np.array(dataset[col], dtype=np.int16)
-    dataset['y'] = np.array(dataset[col], dtype=np.int8)
-#    for col in ['c_mask', 'r_mask']:
-#        dataset[col] = np.array(dataset[col], dtype=np.int8)
+        dataset['c'][i] = get_idx_from_sent(dataset['c'][i], word_idx_map, k)
+        dataset['r'][i] = get_idx_from_sent(dataset['r'][i], word_idx_map, k)
 
 def pad_to_batch_size(X, batch_size):
     n_seqs = len(X)
@@ -160,13 +149,7 @@ add_unknown_words(embeddings, vocab, min_df=1000)
 W, word_idx_map = get_W(embeddings, k=300)
 print "W: ", W.shape
 
-#for key in ['c_mask', 'r_mask', 'c_seqlen', 'r_seqlen']:
-for key in ['c_seqlen', 'r_seqlen']:
-    for dataset in [train_data, val_data, test_data]:
-        dataset[key] = [0] * len(dataset['y'])
-
-#for key in ['c', 'r', 'y', 'c_mask', 'r_mask', 'c_seqlen', 'r_seqlen']:
-for key in ['c', 'r', 'y', 'c_seqlen', 'r_seqlen']:
+for key in ['c', 'r', 'y']:
     for dataset in [train_data, val_data, test_data]:
         dataset[key] = pad_to_batch_size(dataset[key], BATCH_SIZE)
 
@@ -174,10 +157,10 @@ make_idx_data(train_data, word_idx_map)
 make_idx_data(val_data, word_idx_map)
 make_idx_data(test_data, word_idx_map)
 
-for key in ['c', 'r', 'y', 'c_seqlen', 'r_seqlen']:
+for key in ['c', 'r', 'y']:
     print key
     for dataset in [train_data, val_data, test_data]:
-        print dataset[key].shape, dataset[key].nbytes
+        print len(dataset[key])
 
 cPickle.dump([train_data, val_data, test_data], open('dataset.pkl', 'wb'))
 del train_data, val_data, test_data
