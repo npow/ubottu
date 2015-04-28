@@ -98,4 +98,4 @@ def process_line(s, clean_string=True):
 vocab = Counter()
 data = process_file(INPUT_FILE, vocab)
 print INPUT_FILE, "vocab: ", len(vocab), " y: ", len(data['y'])
-cPickle.dump([data, vocab], open('%s.pkl' % INPUT_FILE, 'wb'))
+cPickle.dump([data, vocab], open('%s.pkl' % INPUT_FILE, 'wb'), protocol=-1)

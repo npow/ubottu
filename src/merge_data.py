@@ -162,20 +162,20 @@ for key in ['c', 'r', 'y']:
     for dataset in [train_data, val_data, test_data]:
         print len(dataset[key])
 
-cPickle.dump([train_data, val_data, test_data], open('dataset.pkl', 'wb'))
+cPickle.dump([train_data, val_data, test_data], open('dataset.pkl', 'wb'), protocol=-1)
 del train_data, val_data, test_data
 
-cPickle.dump([W, word_idx_map], open("W.pkl", "wb"))
+cPickle.dump([W, word_idx_map], open("W.pkl", "wb"), protocol=-1)
 del W
 
 rand_vecs = {}
 add_unknown_words(rand_vecs, vocab, min_df=1000)
 W2, _ = get_W(rand_vecs, k=300)
 print "W2: ", W2.shape
-cPickle.dump([W2, word_idx_map], open("W2.pkl", "wb"))
+cPickle.dump([W2, word_idx_map], open("W2.pkl", "wb"), protocol=-1)
 del W2
 
-cPickle.dump(vocab, open('vocab.pkl', 'wb'))
+cPickle.dump(vocab, open('vocab.pkl', 'wb'), protocol=-1)
 del vocab
 
 print "dataset created!"
