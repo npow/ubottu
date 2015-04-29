@@ -1,6 +1,6 @@
 blobs/
 data/
-embeddings/
+embeddings
 *.class
 *.pkl
 *.pyc
