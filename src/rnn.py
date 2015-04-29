@@ -1,4 +1,5 @@
 from __future__ import division
+import argparse
 import cPickle
 import lasagne
 import numpy as np
@@ -75,6 +76,7 @@ class RNN(object):
                  img_w=300,
                  hidden_size=100,
                  batch_size=50,
+                 lr=0.001,
                  lr_decay=0.95,
                  sqr_norm_lim=9,
                  non_static=True,
@@ -235,7 +237,7 @@ class RNN(object):
 #        updates = lasagne.updates.adadelta(cost, params, learning_rate=1.0, rho=lr_decay)
 #        updates = sgd_updates_adadelta(cost, params, lr_decay, 1e-6, sqr_norm_lim)
 #        updates = lasagne.updates.nesterov_momentum(cost, params, learning_rate=0.1)
-        updates = adam(cost, params)
+        updates = adam(cost, params, learning_rate=lr)
 
         givens = {
             c: self.shared_data['c'],
@@ -306,6 +308,8 @@ class RNN(object):
                 test_losses = [self.compute_loss(self.data['test'], i) for i in xrange(n_test_batches)]
                 test_perf = 1 - np.sum(test_losses) / len(self.data['test']['y'])
                 print 'test_perf %f' % (test_perf*100)
+            else:
+                break
         return test_perf
 
 def as_floatX(variable):
@@ -344,23 +348,45 @@ def sgd_updates_adadelta(cost, params, rho=0.95, epsilon=1e-6, norm_lim=9, word_
             updates[param] = stepped_param      
     return updates
 
-print "loading data...",
-train_data, val_data, test_data = cPickle.load(open('dataset.pkl', 'rb'))
-W, word_idx_map = cPickle.load(open('W.pkl', 'rb'))
-print "data loaded!"
+def str2bool(v):
+  return v.lower() in ("yes", "true", "t", "1")
 
-data = { 'train' : train_data, 'val': val_data, 'test': test_data }
+def main():
+  parser = argparse.ArgumentParser()
+  parser.register('type','bool',str2bool)
+  parser.add_argument('--use_conv', type='bool', default=False, help='Use convolutional attention')
+  parser.add_argument('--use_lstm', type='bool', default=False, help='Use LSTMs instead of RNNs')
+  parser.add_argument('--hidden_size', type=int, default=100, help='Hidden size')
+  parser.add_argument('--non_static', type='bool', default=True, help='Whether to fine-tune embeddings')
+  parser.add_argument('--batch_size', type=int, default=BATCH_SIZE, help='Batch size')
+  parser.add_argument('--shuffle_batch', type='bool', default=False, help='Shuffle batch')
+  parser.add_argument('--n_epochs', type=int, default=100, help='Num epochs')
+  parser.add_argument('--lr_decay', type=float, default=0.95, help='Learning rate decay')
+  parser.add_argument('--sqr_norm_lim', type=float, default=1, help='Squared norm limit')
+  parser.add_argument('--lr', type=float, default=0.001, help='Learning rate')
+  args = parser.parse_args()
+  print "args: ", args
 
-rnn = RNN(data,
-          W.astype(theano.config.floatX),
-          img_w=300,
-          hidden_size=100,
-          batch_size=BATCH_SIZE,
-          lr_decay=0.95,
-          sqr_norm_lim=1,
-          non_static=True,
-          use_lstm=False,
-          use_conv=False)
+  print "loading data...",
+  train_data, val_data, test_data = cPickle.load(open('dataset.pkl', 'rb'))
+  W, word_idx_map = cPickle.load(open('W.pkl', 'rb'))
+  print "data loaded!"
 
-print rnn.train(n_epochs=100, shuffle_batch=False)
+  data = { 'train' : train_data, 'val': val_data, 'test': test_data }
 
+  rnn = RNN(data,
+            W.astype(theano.config.floatX),
+            img_w=300,
+            hidden_size=args.hidden_size,
+            batch_size=args.batch_size,
+            lr=args.lr,
+            lr_decay=args.lr_decay,
+            sqr_norm_lim=args.sqr_norm_lim,
+            non_static=args.non_static,
+            use_lstm=args.use_lstm,
+            use_conv=args.use_conv)
+
+  print rnn.train(n_epochs=args.n_epochs, shuffle_batch=args.shuffle_batch)
+
+if __name__ == '__main__':
+  main()
