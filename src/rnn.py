@@ -8,6 +8,7 @@ import re
 import sys
 import theano
 import theano.tensor as T
+import time
 from collections import defaultdict, OrderedDict
 from theano.ifelse import ifelse
 from theano.printing import Print as pp
@@ -291,13 +292,15 @@ class RNN(object):
                 indices = np.random.permutation(indices)
             bar = pyprind.ProgBar(len(indices), monitor=True)
             total_cost = 0
+            start_time = time.time()
             for minibatch_index in indices:
                 self.set_shared_variables(self.data['train'], minibatch_index)
                 cost_epoch = self.train_model()
                 total_cost += cost_epoch
                 self.set_zero(self.zero_vec)
                 bar.update()
-            print "cost: ", (total_cost / len(indices))
+            end_time = time.time()
+            print "cost: ", (total_cost / len(indices)), " took: %d(s)" % (end_time - start_time)
             train_losses = [self.compute_loss(self.data['train'], i) for i in xrange(n_train_batches)]
             train_perf = 1 - np.sum(train_losses) / len(self.data['train']['y'])
             val_losses = [self.compute_loss(self.data['val'], i) for i in xrange(n_val_batches)]
