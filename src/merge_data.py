@@ -5,9 +5,9 @@ import random
 import sys
 from collections import Counter
 
-TRAIN_FILES = [f.strip() for f in open(sys.argv[1])]
-VAL_FILES = [f.strip() for f in open(sys.argv[2])]
-TEST_FILES = [f.strip() for f in open(sys.argv[3])]
+TRAIN_FILE = '../data/trainset.csv.pkl'
+VAL_FILES = '../data/valset.csv.pkl'
+TEST_FILES = '../data/testset.csv.pkl'
 
 W2V_FILE = '../embeddings/word2vec/GoogleNews-vectors-negative300.bin'
 GLOVE_FILE = '../embeddings/glove/glove.840B.300d.txt'
@@ -116,20 +116,9 @@ def pad_to_batch_size(X, batch_size):
         X += X[:batch_size-to_pad]
     return X
 
-def merge_files(pkl_files):
-    data = { 'c': [], 'r': [], 'y': [] }
-    vocab = Counter()
-    for pkl_file in TRAIN_FILES:
-        cur_data, cur_vocab = cPickle.load(open(pkl_file))
-        for key in cur_data:
-            data[key] += cur_data[key]
-        vocab += cur_vocab
-        del cur_data, cur_vocab
-    return data, vocab
-
-train_data, train_vocab = merge_files(TRAIN_FILES)
-val_data, val_vocab = merge_files(VAL_FILES)
-test_data, test_vocab = merge_files(TEST_FILES)
+train_data, train_vocab = cPickle.load(TRAIN_FILE)
+val_data, val_vocab = cPickle.load(VAL_FILE)
+test_data, test_vocab = cPickle.load(TEST_FILE)
 
 vocab = train_vocab + val_vocab + test_vocab
 del train_vocab, val_vocab, test_vocab
