@@ -5,7 +5,7 @@ find ../data/pieces -type f -name '*.csv' > $CSV_FILES
 
 NUM_LINES=$(wc -l < "$CSV_FILES")
 for x in `seq 0 $(($NUM_LINES-1))`; do
-  python preprocess_data.py $x &
+  pypy preprocess_data.py $x &
 done
 wait
 
