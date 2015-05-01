@@ -141,7 +141,7 @@ W, word_idx_map = get_W(embeddings, k=300)
 print "W: ", W.shape
 
 for key in ['c', 'r', 'y']:
-    for dataset in [train_data, val_data, test_data]:
+    for dataset in [train_data, val_data]:
         dataset[key] = pad_to_batch_size(dataset[key], BATCH_SIZE)
 
 make_idx_data(train_data, word_idx_map)
