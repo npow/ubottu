@@ -7,7 +7,9 @@ import sys
 from collections import Counter
 from twokenize import tokenize
 
-INPUT_FILE = sys.argv[1]
+FILE_INDEX = int(sys.argv[1])
+FILES = [f.strip() for f in open('csv_files.txt')]
+INPUT_FILE = FILES[FILE_INDEX]
 print INPUT_FILE
 
 """
