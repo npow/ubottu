@@ -6,8 +6,8 @@ import sys
 from collections import Counter
 
 TRAIN_FILE = '../data/trainset.csv.pkl'
-VAL_FILES = '../data/valset.csv.pkl'
-TEST_FILES = '../data/testset.csv.pkl'
+VAL_FILE = '../data/valset.csv.pkl'
+TEST_FILE = '../data/testset.csv.pkl'
 
 W2V_FILE = '../embeddings/word2vec/GoogleNews-vectors-negative300.bin'
 GLOVE_FILE = '../embeddings/glove/glove.840B.300d.txt'
@@ -116,9 +116,9 @@ def pad_to_batch_size(X, batch_size):
         X += X[:batch_size-to_pad]
     return X
 
-train_data, train_vocab = cPickle.load(TRAIN_FILE)
-val_data, val_vocab = cPickle.load(VAL_FILE)
-test_data, test_vocab = cPickle.load(TEST_FILE)
+train_data, train_vocab = cPickle.load(open(TRAIN_FILE))
+val_data, val_vocab = cPickle.load(open(VAL_FILE))
+test_data, test_vocab = cPickle.load(open(TEST_FILE))
 
 vocab = train_vocab + val_vocab + test_vocab
 del train_vocab, val_vocab, test_vocab
