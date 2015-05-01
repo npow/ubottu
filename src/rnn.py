@@ -318,7 +318,10 @@ class RNN(object):
                 for k in [1, 2, 5]:
                     print 'recall@%d: ' % k, self.recall(test_probas, k)
             else:
-                break
+                if not fine_tune:
+                    fine_tune = True # try fine-tuning when done training
+                else:
+                    break
         return test_perf
 
     def recall(self, probas, k):
