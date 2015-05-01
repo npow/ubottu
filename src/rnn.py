@@ -80,7 +80,7 @@ class RNN(object):
                  lr=0.001,
                  lr_decay=0.95,
                  sqr_norm_lim=9,
-                 non_static=True,
+                 fine_tune=True,
                  filter_sizes=[3,4,5],
                  num_filters=100,
                  use_conv=False,
@@ -230,7 +230,7 @@ class RNN(object):
 
         cost = T.nnet.binary_crossentropy(o, y).mean()
         params = lasagne.layers.get_all_params(l_out) + [self.M]
-        if non_static:
+        if fine_tune:
             params += [embeddings]
             
         total_params = sum([p.get_value().size for p in params])
@@ -249,6 +249,7 @@ class RNN(object):
         }
         self.train_model = theano.function([], cost, updates=updates, givens=givens, on_unused_input='warn')         
         self.get_loss = theano.function([], errors, givens=givens, on_unused_input='warn')
+        self.get_probas = theano.function([], probas, givens=givens, on_unused_input='warn')
 
     def get_batch(self, dataset, index, max_l=MAX_LEN):
         seqlen = np.zeros((self.batch_size,), dtype=np.int32)
@@ -273,6 +274,10 @@ class RNN(object):
     def compute_loss(self, dataset, index):
         self.set_shared_variables(dataset, index)
         return self.get_loss()
+
+    def compute_probas(self, dataset, index):
+        self.set_shared_variables(dataset, index)
+        return self.get_probas()[:,1]
 
     def train(self, n_epochs=100, shuffle_batch=False):
         epoch = 0
@@ -308,12 +313,24 @@ class RNN(object):
             print 'epoch %i, train_perf %f, val_perf %f' % (epoch, train_perf*100, val_perf*100)
             if val_perf >= best_val_perf:
                 best_val_perf = val_perf
-                test_losses = [self.compute_loss(self.data['test'], i) for i in xrange(n_test_batches)]
-                test_perf = 1 - np.sum(test_losses) / len(self.data['test']['y'])
-                print 'test_perf %f' % (test_perf*100)
+                test_probas = np.concatenate([self.compute_probas(self.data['test'], i) for i in xrange(n_test_batches)])
+                print 'test_perf'
+                for k in [1, 2, 5]:
+                    print 'recall@%d: ' % k, self.recall(test_probas, k)
             else:
                 break
         return test_perf
+
+    def recall(self, probas, k):
+        group_size = 10
+        n_batches = len(probas) // group_size
+        n_correct = 0
+        for i in xrange(n_batches):
+            batch = probas[i*group_size:(i+1)*group_size]
+            indices = np.argpartition(batch, -k)[-k:]
+            if 0 in indices:
+                n_correct += 1
+        return n_correct / (len(probas) / 10.0)
 
 def as_floatX(variable):
     if isinstance(variable, float):
@@ -360,7 +377,7 @@ def main():
   parser.add_argument('--use_conv', type='bool', default=False, help='Use convolutional attention')
   parser.add_argument('--use_lstm', type='bool', default=False, help='Use LSTMs instead of RNNs')
   parser.add_argument('--hidden_size', type=int, default=100, help='Hidden size')
-  parser.add_argument('--non_static', type='bool', default=True, help='Whether to fine-tune embeddings')
+  parser.add_argument('--fine_tune', type='bool', default=True, help='Whether to fine-tune embeddings')
   parser.add_argument('--batch_size', type=int, default=BATCH_SIZE, help='Batch size')
   parser.add_argument('--shuffle_batch', type='bool', default=False, help='Shuffle batch')
   parser.add_argument('--n_epochs', type=int, default=100, help='Num epochs')
@@ -385,7 +402,7 @@ def main():
             lr=args.lr,
             lr_decay=args.lr_decay,
             sqr_norm_lim=args.sqr_norm_lim,
-            non_static=args.non_static,
+            fine_tune=args.fine_tune,
             use_lstm=args.use_lstm,
             use_conv=args.use_conv)
 
