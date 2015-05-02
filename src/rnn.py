@@ -314,10 +314,14 @@ class RNN(object):
             print 'epoch %i, train_perf %f, val_perf %f' % (epoch, train_perf*100, val_perf*100)
             if val_perf >= best_val_perf:
                 best_val_perf = val_perf
+                test_losses = [self.compute_loss(self.data['test'], i) for i in xrange(n_test_batches)]
+                test_perf = 1 - np.sum(test_losses) / len(self.data['test']['y'])
+                print 'test_perf: %f' % (test_perf*100)
                 test_probas = np.concatenate([self.compute_probas(self.data['test'], i) for i in xrange(n_test_batches)])
-                print 'test_perf'
-                for k in [1, 2, 5]:
-                    print 'recall@%d: ' % k, self.recall(test_probas, k)
+                for group_size in [2, 10]:
+                    print 'group_size: %d' % group_size
+                    for k in [1, 2, 5]:
+                        print 'recall@%d: ' % k, self.recall(test_probas, k, group_size)
             else:
                 if not self.fine_tune:
                     self.fine_tune = True # try fine-tuning when done training
@@ -325,16 +329,17 @@ class RNN(object):
                     break
         return test_perf
 
-    def recall(self, probas, k):
-        group_size = 10
+    def recall(self, probas, k, group_size):
         n_batches = len(probas) // group_size
         n_correct = 0
         for i in xrange(n_batches):
-            batch = probas[i*group_size:(i+1)*group_size]
-            indices = np.argpartition(batch, -k)[-k:]
+            batch = np.array(probas[i*group_size:(i+1)*group_size])
+            p = np.random.permutation(len(batch))
+            indices = p[np.argpartition(batch[p], -k)[-k:]]
+#            indices = np.argpartition(batch, -k)[-k:]
             if 0 in indices:
                 n_correct += 1
-        return n_correct / (len(probas) / 10.0)
+        return n_correct / (len(probas) / group_size)
 
 def as_floatX(variable):
     if isinstance(variable, float):
