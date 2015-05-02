@@ -88,6 +88,7 @@ class RNN(object):
                  is_bidirectional=False):
         self.data = data
         self.batch_size = batch_size
+        self.fine_tune = fine_tune
         
         img_h = MAX_LEN
         
@@ -318,8 +319,8 @@ class RNN(object):
                 for k in [1, 2, 5]:
                     print 'recall@%d: ' % k, self.recall(test_probas, k)
             else:
-                if not fine_tune:
-                    fine_tune = True # try fine-tuning when done training
+                if not self.fine_tune:
+                    self.fine_tune = True # try fine-tuning when done training
                 else:
                     break
         return test_perf
