@@ -321,7 +321,8 @@ class RNN(object):
                 for group_size in [2, 10]:
                     print 'group_size: %d' % group_size
                     for k in [1, 2, 5]:
-                        print 'recall@%d: ' % k, self.recall(test_probas, k, group_size)
+                        if k < group_size:
+                            print 'recall@%d: ' % k, self.recall(test_probas, k, group_size)
             else:
                 if not self.fine_tune:
                     self.fine_tune = True # try fine-tuning when done training
@@ -329,17 +330,17 @@ class RNN(object):
                     break
         return test_perf
 
-    def recall(self, probas, k, group_size):
+    def recall(self, probas, k, group_size):    
         n_batches = len(probas) // group_size
         n_correct = 0
         for i in xrange(n_batches):
             batch = np.array(probas[i*group_size:(i+1)*group_size])
-            p = np.random.permutation(len(batch))
-            indices = p[np.argpartition(batch[p], -k)[-k:]]
-#            indices = np.argpartition(batch, -k)[-k:]
+            #p = np.random.permutation(len(batch))
+            #indices = p[np.argpartition(batch[p], -k)[-k:]]
+            indices = np.argpartition(batch, -k)[-k:]
             if 0 in indices:
                 n_correct += 1
-        return n_correct / (len(probas) / group_size)
+        return n_correct / (len(probas) / group_size)    
 
 def as_floatX(variable):
     if isinstance(variable, float):
