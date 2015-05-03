@@ -417,7 +417,7 @@ def main():
   parser.add_argument('--lr_decay', type=float, default=0.95, help='Learning rate decay')
   parser.add_argument('--sqr_norm_lim', type=float, default=1, help='Squared norm limit')
   parser.add_argument('--lr', type=float, default=0.001, help='Learning rate')
-  parser.add_argument('--optimizer', type=string, default='adam', help='Optimizer')
+  parser.add_argument('--optimizer', type=str, default='adam', help='Optimizer')
   args = parser.parse_args()
   print "args: ", args
 
