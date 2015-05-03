@@ -80,7 +80,9 @@ class RNN(object):
                  lr=0.001,
                  lr_decay=0.95,
                  sqr_norm_lim=9,
-                 fine_tune=True,
+                 fine_tune_W=True,
+                 fine_tune_M=False,
+                 optimizer='adam',
                  filter_sizes=[3,4,5],
                  num_filters=100,
                  use_conv=False,
@@ -88,7 +90,12 @@ class RNN(object):
                  is_bidirectional=False):
         self.data = data
         self.batch_size = batch_size
-        self.fine_tune = fine_tune
+        self.fine_tune_W = fine_tune_W
+        self.fine_tune_M = fine_tune_M
+        self.lr = lr
+        self.lr_decay = lr_decay
+        self.optimizer = optimizer
+        self.sqr_norm_lim = sqr_norm_lim
         
         img_h = MAX_LEN
         
@@ -227,19 +234,30 @@ class RNN(object):
         
         probas = T.concatenate([(1-o).reshape((-1,1)), o.reshape((-1,1))], axis=1)
         pred = T.argmax(probas, axis=1)
-        errors = T.sum(T.neq(pred, y))    
+        self.errors = T.sum(T.neq(pred, y))
+        self.cost = T.nnet.binary_crossentropy(o, y).mean()
+        self.l_out = l_out
+        self.embeddings = embeddings
 
-        cost = T.nnet.binary_crossentropy(o, y).mean()
-        params = lasagne.layers.get_all_params(l_out) + [self.M]
-        if fine_tune:
-            params += [embeddings]
+        self.update_params()
+
+    def update_params(self):
+        params = lasagne.layers.get_all_params(self.l_out)
+        if self.fine_tune_W:
+            params += [self.embeddings]
+        if self.fine_tune_M:
+            params += [self.M]
             
         total_params = sum([p.get_value().size for p in params])
         print "total_params: ", total_params
-#        updates = lasagne.updates.adadelta(cost, params, learning_rate=1.0, rho=lr_decay)
-#        updates = sgd_updates_adadelta(cost, params, lr_decay, 1e-6, sqr_norm_lim)
-#        updates = lasagne.updates.nesterov_momentum(cost, params, learning_rate=0.1)
-        updates = adam(cost, params, learning_rate=lr)
+
+        if 'adam' == self.optimizer:
+            updates = adam(self.cost, params, learning_rate=self.lr)
+        elif 'adadelta' == self.optimizer:
+            updates = sgd_updates_adadelta(self.cost, params, self.lr_decay, 1e-6, self.sqr_norm_lim)
+#            updates = lasagne.updates.adadelta(self.cost, params, learning_rate=1.0, rho=self.lr_decay)
+        else:
+            raise 'Unsupported optimizer: %s' % self.optimizer
 
         givens = {
             c: self.shared_data['c'],
@@ -248,9 +266,9 @@ class RNN(object):
             c_seqlen: self.shared_data['c_seqlen'],
             r_seqlen: self.shared_data['r_seqlen']
         }
-        self.train_model = theano.function([], cost, updates=updates, givens=givens, on_unused_input='warn')         
-        self.get_loss = theano.function([], errors, givens=givens, on_unused_input='warn')
-        self.get_probas = theano.function([], probas, givens=givens, on_unused_input='warn')
+        self.train_model = theano.function([], self.cost, updates=updates, givens=givens, on_unused_input='warn')
+        self.get_loss = theano.function([], self.errors, givens=givens, on_unused_input='warn')
+        self.get_probas = theano.function([], self.probas, givens=givens, on_unused_input='warn')
 
     def get_batch(self, dataset, index, max_l=MAX_LEN):
         seqlen = np.zeros((self.batch_size,), dtype=np.int32)
@@ -324,10 +342,14 @@ class RNN(object):
                         if k < group_size:
                             print 'recall@%d: ' % k, self.recall(test_probas, k, group_size)
             else:
-                if not self.fine_tune:
-                    self.fine_tune = True # try fine-tuning when done training
+                if not self.fine_tune_W:
+                    self.fine_tune_W = True # try fine-tuning W
                 else:
-                    break
+                    if not self.fine_tune_M:
+                        self.fine_tune_M = True # try fine-tuning M
+                    else:
+                        break
+                self.update_params()
         return test_perf
 
     def recall(self, probas, k, group_size):    
@@ -387,13 +409,15 @@ def main():
   parser.add_argument('--use_conv', type='bool', default=False, help='Use convolutional attention')
   parser.add_argument('--use_lstm', type='bool', default=False, help='Use LSTMs instead of RNNs')
   parser.add_argument('--hidden_size', type=int, default=100, help='Hidden size')
-  parser.add_argument('--fine_tune', type='bool', default=True, help='Whether to fine-tune embeddings')
+  parser.add_argument('--fine_tune_W', type='bool', default=False, help='Whether to fine-tune W')
+  parser.add_argument('--fine_tune_M', type='bool', default=False, help='Whether to fine-tune M')
   parser.add_argument('--batch_size', type=int, default=BATCH_SIZE, help='Batch size')
   parser.add_argument('--shuffle_batch', type='bool', default=False, help='Shuffle batch')
   parser.add_argument('--n_epochs', type=int, default=100, help='Num epochs')
   parser.add_argument('--lr_decay', type=float, default=0.95, help='Learning rate decay')
   parser.add_argument('--sqr_norm_lim', type=float, default=1, help='Squared norm limit')
   parser.add_argument('--lr', type=float, default=0.001, help='Learning rate')
+  parser.add_argument('--optimizer', type=string, default='adam', help='Optimizer')
   args = parser.parse_args()
   print "args: ", args
 
@@ -412,7 +436,9 @@ def main():
             lr=args.lr,
             lr_decay=args.lr_decay,
             sqr_norm_lim=args.sqr_norm_lim,
-            fine_tune=args.fine_tune,
+            fine_tune_W=args.fine_tune_W,
+            fine_tune_M=args.fine_tune_M,
+            optimizer=args.optimizer,
             use_lstm=args.use_lstm,
             use_conv=args.use_conv)
 
