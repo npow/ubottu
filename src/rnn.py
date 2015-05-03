@@ -232,12 +232,17 @@ class RNN(object):
         for key in ['y', 'c_seqlen', 'r_seqlen']: 
             self.shared_data[key] = theano.shared(np.zeros((batch_size,), dtype=np.int32))
         
-        probas = T.concatenate([(1-o).reshape((-1,1)), o.reshape((-1,1))], axis=1)
-        pred = T.argmax(probas, axis=1)
-        self.errors = T.sum(T.neq(pred, y))
+        self.probas = T.concatenate([(1-o).reshape((-1,1)), o.reshape((-1,1))], axis=1)
+        self.pred = T.argmax(self.probas, axis=1)
+        self.errors = T.sum(T.neq(self.pred, y))
         self.cost = T.nnet.binary_crossentropy(o, y).mean()
         self.l_out = l_out
         self.embeddings = embeddings
+        self.c = c
+        self.r = r
+        self.y = y
+        self.c_seqlen = c_seqlen
+        self.r_seqlen = r_seqlen
 
         self.update_params()
 
@@ -260,11 +265,11 @@ class RNN(object):
             raise 'Unsupported optimizer: %s' % self.optimizer
 
         givens = {
-            c: self.shared_data['c'],
-            r: self.shared_data['r'],
-            y: self.shared_data['y'],
-            c_seqlen: self.shared_data['c_seqlen'],
-            r_seqlen: self.shared_data['r_seqlen']
+            self.c: self.shared_data['c'],
+            self.r: self.shared_data['r'],
+            self.y: self.shared_data['y'],
+            self.c_seqlen: self.shared_data['c_seqlen'],
+            self.r_seqlen: self.shared_data['r_seqlen']
         }
         self.train_model = theano.function([], self.cost, updates=updates, givens=givens, on_unused_input='warn')
         self.get_loss = theano.function([], self.errors, givens=givens, on_unused_input='warn')
