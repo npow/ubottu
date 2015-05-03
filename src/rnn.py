@@ -358,16 +358,17 @@ class RNN(object):
         return test_perf
 
     def recall(self, probas, k, group_size):    
-        n_batches = len(probas) // group_size
+        test_size = 10
+        n_batches = len(probas) // test_size
         n_correct = 0
         for i in xrange(n_batches):
-            batch = np.array(probas[i*group_size:(i+1)*group_size])
+            batch = np.array(probas[i*test_size:(i+1)*test_size])[:group_size]
             #p = np.random.permutation(len(batch))
             #indices = p[np.argpartition(batch[p], -k)[-k:]]
             indices = np.argpartition(batch, -k)[-k:]
             if 0 in indices:
                 n_correct += 1
-        return n_correct / (len(probas) / group_size)    
+        return n_correct / (len(probas) / test_size)
 
 def as_floatX(variable):
     if isinstance(variable, float):
