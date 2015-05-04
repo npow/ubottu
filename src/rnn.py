@@ -424,12 +424,13 @@ def main():
   parser.add_argument('--sqr_norm_lim', type=float, default=1, help='Squared norm limit')
   parser.add_argument('--lr', type=float, default=0.001, help='Learning rate')
   parser.add_argument('--optimizer', type=str, default='adam', help='Optimizer')
+  parser.add_argument('--suffix', type=str, default='', help='Suffix for pkl files')
   args = parser.parse_args()
   print "args: ", args
 
   print "loading data...",
-  train_data, val_data, test_data = cPickle.load(open('dataset.pkl', 'rb'))
-  W, word_idx_map = cPickle.load(open('W.pkl', 'rb'))
+  train_data, val_data, test_data = cPickle.load(open('dataset%s.pkl' % args.suffix, 'rb'))
+  W, word_idx_map = cPickle.load(open('W%s.pkl' % args.suffix, 'rb'))
   print "data loaded!"
 
   data = { 'train' : train_data, 'val': val_data, 'test': test_data }

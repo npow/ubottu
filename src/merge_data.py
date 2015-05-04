@@ -5,7 +5,11 @@ import random
 import sys
 from collections import Counter
 
-TRAIN_FILE = '../data/trainset.csv.pkl'
+if len(sys.argv) > 1:
+  SUFFIX = sys.argv[1]
+  print SUFFIX
+
+TRAIN_FILE = '../data/trainset%s.csv.pkl' % SUFFIX
 VAL_FILE = '../data/valset.csv.pkl'
 TEST_FILE = '../data/testset.csv.pkl'
 
@@ -153,20 +157,20 @@ for key in ['c', 'r', 'y']:
     for dataset in [train_data, val_data, test_data]:
         print len(dataset[key])
 
-cPickle.dump([train_data, val_data, test_data], open('dataset.pkl', 'wb'), protocol=-1)
+cPickle.dump([train_data, val_data, test_data], open('dataset%s.pkl' % SUFFIX, 'wb'), protocol=-1)
 del train_data, val_data, test_data
 
-cPickle.dump([W, word_idx_map], open("W.pkl", "wb"), protocol=-1)
+cPickle.dump([W, word_idx_map], open("W%s.pkl" % SUFFIX, "wb"), protocol=-1)
 del W
 
 rand_vecs = {}
 add_unknown_words(rand_vecs, vocab, min_df=1000)
 W2, _ = get_W(rand_vecs, k=300)
 print "W2: ", W2.shape
-cPickle.dump([W2, word_idx_map], open("W2.pkl", "wb"), protocol=-1)
+cPickle.dump([W2, word_idx_map], open("W2%s.pkl" % SUFFIX, "wb"), protocol=-1)
 del W2
 
-cPickle.dump(vocab, open('vocab.pkl', 'wb'), protocol=-1)
+cPickle.dump(vocab, open('vocab%s.pkl' % SUFFIX, 'wb'), protocol=-1)
 del vocab
 
 print "dataset created!"
