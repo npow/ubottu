@@ -125,7 +125,7 @@ class RNN(object):
                 l_recurrent = lasagne.layers.LSTMLayer(l_in,
                                                        hidden_size,
                                                        backwards=False,
-                                                       learn_init=False,
+                                                       learn_init=True,
                                                        peepholes=True)
             else:
                 if False:
@@ -196,13 +196,13 @@ class RNN(object):
                         l_recurrent,
                         num_filters=num_filters,
                         filter_size=(filter_size, hidden_size),
-                        strides=(1,1),
+                        stride=(1,1),
                         nonlinearity=lasagne.nonlinearities.rectify,
                         border_mode='valid'
                         )
                 pool_layer = lasagne.layers.MaxPool2DLayer(
                         conv_layer,
-                        ds=(img_h-filter_size+1, 1)
+                        pool_size=(img_h-filter_size+1, 1)
                         )
                 conv_layers.append(pool_layer)
 
@@ -306,7 +306,7 @@ class RNN(object):
     def train(self, n_epochs=100, shuffle_batch=False):
         epoch = 0
         best_val_perf = 0
-        val_perf = 0
+        best_val_rk1 = 0
         test_perf = 0
         cost_epoch = 0
         
@@ -335,17 +335,18 @@ class RNN(object):
             val_losses = [self.compute_loss(self.data['val'], i) for i in xrange(n_val_batches)]
             val_perf = 1 - np.sum(val_losses) / len(self.data['val']['y'])
             print 'epoch %i, train_perf %f, val_perf %f' % (epoch, train_perf*100, val_perf*100)
-            if val_perf >= best_val_perf:
+
+            val_probas = np.concatenate([self.compute_probas(self.data['val'], i) for i in xrange(n_val_batches)])
+            val_recall_k = self.compute_recall_ks(val_probas)
+
+            if val_perf > best_val_perf or val_recall_k[10][1] > best_val_rk1:
                 best_val_perf = val_perf
+                best_val_rk1 = val_recall_k[10][1]
                 test_losses = [self.compute_loss(self.data['test'], i) for i in xrange(n_test_batches)]
                 test_perf = 1 - np.sum(test_losses) / len(self.data['test']['y'])
                 print 'test_perf: %f' % (test_perf*100)
                 test_probas = np.concatenate([self.compute_probas(self.data['test'], i) for i in xrange(n_test_batches)])
-                for group_size in [2, 10]:
-                    print 'group_size: %d' % group_size
-                    for k in [1, 2, 5]:
-                        if k < group_size:
-                            print 'recall@%d: ' % k, self.recall(test_probas, k, group_size)
+                self.compute_recall_ks(test_probas)
             else:
                 if not self.fine_tune_W:
                     self.fine_tune_W = True # try fine-tuning W
@@ -356,6 +357,17 @@ class RNN(object):
                         break
                 self.update_params()
         return test_perf
+
+    def compute_recall_ks(self, probas):
+      recall_k = {}
+      for group_size in [2, 10]:
+          recall_k[group_size] = {}
+          print 'group_size: %d' % group_size
+          for k in [1, 2, 5]:
+              if k < group_size:
+                  recall_k[group_size][k] = self.recall(probas, k, group_size)
+                  print 'recall@%d' % k, recall_k[group_size][k]
+      return recall_k
 
     def recall(self, probas, k, group_size):    
         test_size = 10
@@ -412,9 +424,9 @@ def str2bool(v):
 def main():
   parser = argparse.ArgumentParser()
   parser.register('type','bool',str2bool)
-  parser.add_argument('--use_conv', type='bool', default=False, help='Use convolutional attention')
+  parser.add_argument('--use_conv', type='bool', default=True, help='Use convolutional attention')
   parser.add_argument('--use_lstm', type='bool', default=False, help='Use LSTMs instead of RNNs')
-  parser.add_argument('--hidden_size', type=int, default=100, help='Hidden size')
+  parser.add_argument('--hidden_size', type=int, default=200, help='Hidden size')
   parser.add_argument('--fine_tune_W', type='bool', default=False, help='Whether to fine-tune W')
   parser.add_argument('--fine_tune_M', type='bool', default=False, help='Whether to fine-tune M')
   parser.add_argument('--batch_size', type=int, default=BATCH_SIZE, help='Batch size')
