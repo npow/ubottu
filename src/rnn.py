@@ -103,8 +103,8 @@ class RNN(object):
         c = T.imatrix('c')
         r = T.imatrix('r')
         y = T.ivector('y')
-#        c_mask = T.bmatrix('c_mask')
-#        r_mask = T.bmatrix('r_mask')
+        c_mask = T.imatrix('c_mask')
+        r_mask = T.imatrix('r_mask')
         c_seqlen = T.ivector('c_seqlen')
         r_seqlen = T.ivector('r_seqlen')
         embeddings = theano.shared(U, name='embeddings', borrow=True)
@@ -119,7 +119,38 @@ class RNN(object):
         l_in = lasagne.layers.InputLayer(shape=(batch_size, img_h, img_w))
         
         if is_bidirectional:
-            pass
+            if use_lstm:
+                l_fwd = lasagne.layers.LSTMLayer(l_in,
+                                                 hidden_size,
+                                                 backwards=False,
+                                                 learn_init=True,
+                                                 peepholes=True)
+
+                l_bck = lasagne.layers.LSTMLayer(l_in,
+                                                 hidden_size,
+                                                 backwards=True,
+                                                 learn_init=True,
+                                                 peepholes=True)
+            else:
+                l_fwd = lasagne.layers.RecurrentLayer(l_in,
+                                                      hidden_size,
+                                                      nonlinearity=lasagne.nonlinearities.tanh,
+                                                      W_hid_to_hid=lasagne.init.Orthogonal(),
+                                                      W_in_to_hid=lasagne.init.Orthogonal(),
+                                                      backwards=False,
+                                                      learn_init=True
+                                                      )
+                
+                l_bck = lasagne.layers.RecurrentLayer(l_in,
+                                                      hidden_size,
+                                                      nonlinearity=lasagne.nonlinearities.tanh,
+                                                      W_hid_to_hid=lasagne.init.Orthogonal(),
+                                                      W_in_to_hid=lasagne.init.Orthogonal(),
+                                                      backwards=True,
+                                                      learn_init=True
+                                                      )
+                
+            l_recurrent = lasagne.layers.ConcatLayer([l_fwd, l_bck])  
         else:
             if use_lstm:
                 l_recurrent = lasagne.layers.LSTMLayer(l_in,
@@ -187,15 +218,16 @@ class RNN(object):
                                                           learn_init=True
                                                           )                    
         
+        recurrent_size = hidden_size * 2 if is_bidirectional else hidden_size
         if use_conv:
-            l_recurrent = lasagne.layers.ReshapeLayer(l_recurrent, (batch_size, 1, img_h, hidden_size))
+            l_recurrent = lasagne.layers.ReshapeLayer(l_recurrent, (batch_size, 1, img_h, recurrent_size))
             #l_recurrent = lasagne.layers.DropoutLayer(l_recurrent, p=0.5)
             conv_layers = []
             for filter_size in filter_sizes:
                 conv_layer = lasagne.layers.Conv2DLayer(
                         l_recurrent,
                         num_filters=num_filters,
-                        filter_size=(filter_size, hidden_size),
+                        filter_size=(filter_size, recurrent_size),
                         stride=(1,1),
                         nonlinearity=lasagne.nonlinearities.rectify,
                         border_mode='valid'
@@ -206,8 +238,6 @@ class RNN(object):
                         )
                 conv_layers.append(pool_layer)
 
-            #hidden_size = len(conv_layers) * num_filters
-            #hidden_size = num_filters
             l_hidden1 = lasagne.layers.ConcatLayer(conv_layers)
             l_hidden2 = lasagne.layers.DenseLayer(l_hidden1, num_units=hidden_size, nonlinearity=lasagne.nonlinearities.tanh)
             l_out = l_hidden2
@@ -215,11 +245,11 @@ class RNN(object):
             l_out = l_recurrent
         
         if use_conv:
-            e_context = l_out.get_output(c_input, deterministic=False)
-            e_response = l_out.get_output(r_input, deterministic=False)
+            e_context = l_out.get_output(c_input, c_mask, deterministic=False)
+            e_response = l_out.get_output(r_input, r_mask, deterministic=False)
         else:         
-            e_context = l_out.get_output(c_input, deterministic=False)[T.arange(batch_size), c_seqlen].reshape((c.shape[0], hidden_size))   
-            e_response = l_out.get_output(r_input, deterministic=False)[T.arange(batch_size), r_seqlen].reshape((r.shape[0], hidden_size))
+            e_context = l_out.get_output(c_input, c_mask, deterministic=False)[T.arange(batch_size), c_seqlen].reshape((c.shape[0], hidden_size))
+            e_response = l_out.get_output(r_input, r_mask, deterministic=False)[T.arange(batch_size), r_seqlen].reshape((r.shape[0], hidden_size))
             
         dp = T.batched_dot(e_context, T.dot(e_response, self.M.T))
         #dp = pp('dp')(dp)
@@ -227,7 +257,7 @@ class RNN(object):
         o = T.clip(o, 1e-7, 1.0-1e-7)
 
         self.shared_data = {}
-        for key in ['c', 'r']:
+        for key in ['c', 'r', 'c_mask', 'r_mask']:
             self.shared_data[key] = theano.shared(np.zeros((batch_size, MAX_LEN), dtype=np.int32))
         for key in ['y', 'c_seqlen', 'r_seqlen']: 
             self.shared_data[key] = theano.shared(np.zeros((batch_size,), dtype=np.int32))
@@ -243,6 +273,8 @@ class RNN(object):
         self.y = y
         self.c_seqlen = c_seqlen
         self.r_seqlen = r_seqlen
+        self.c_mask = c_mask
+        self.r_mask = r_mask
 
         self.update_params()
 
@@ -269,7 +301,9 @@ class RNN(object):
             self.r: self.shared_data['r'],
             self.y: self.shared_data['y'],
             self.c_seqlen: self.shared_data['c_seqlen'],
-            self.r_seqlen: self.shared_data['r_seqlen']
+            self.r_seqlen: self.shared_data['r_seqlen'],
+            self.c_mask: self.shared_data['c_mask'],
+            self.r_mask: self.shared_data['r_mask']
         }
         self.train_model = theano.function([], self.cost, updates=updates, givens=givens, on_unused_input='warn')
         self.get_loss = theano.function([], self.errors, givens=givens, on_unused_input='warn')
@@ -277,23 +311,27 @@ class RNN(object):
 
     def get_batch(self, dataset, index, max_l=MAX_LEN):
         seqlen = np.zeros((self.batch_size,), dtype=np.int32)
+        mask = np.zeros((self.batch_size,max_l), dtype=np.int32)
         batch = np.zeros((self.batch_size, max_l), dtype=np.int32)
         data = dataset[index*self.batch_size:(index+1)*self.batch_size]
         for i,row in enumerate(data):
             row = row[:max_l]
             batch[i,0:len(row)] = row
             seqlen[i] = len(row)-1
-        return batch, seqlen
+            mask[i,0:len(row)] = 1
+        return batch, seqlen, mask
     
     def set_shared_variables(self, dataset, index):
-        c, c_seqlen = self.get_batch(dataset['c'], index)
-        r, r_seqlen = self.get_batch(dataset['r'], index)
+        c, c_seqlen, c_mask = self.get_batch(dataset['c'], index)
+        r, r_seqlen, r_mask = self.get_batch(dataset['r'], index)
         y = np.array(dataset['y'][index*self.batch_size:(index+1)*self.batch_size], dtype=np.int32)
         self.shared_data['c'].set_value(c)
         self.shared_data['r'].set_value(r)
         self.shared_data['y'].set_value(y)
         self.shared_data['c_seqlen'].set_value(c_seqlen)
         self.shared_data['r_seqlen'].set_value(r_seqlen)     
+        self.shared_data['c_mask'].set_value(c_mask)
+        self.shared_data['r_mask'].set_value(r_mask)     
 
     def compute_loss(self, dataset, index):
         self.set_shared_variables(dataset, index)
@@ -431,6 +469,7 @@ def main():
   parser.add_argument('--fine_tune_M', type='bool', default=False, help='Whether to fine-tune M')
   parser.add_argument('--batch_size', type=int, default=BATCH_SIZE, help='Batch size')
   parser.add_argument('--shuffle_batch', type='bool', default=False, help='Shuffle batch')
+  parser.add_argument('--is_bidirectional', type='bool', default=False, help='Bidirectional RNN/LSTM')
   parser.add_argument('--n_epochs', type=int, default=100, help='Num epochs')
   parser.add_argument('--lr_decay', type=float, default=0.95, help='Learning rate decay')
   parser.add_argument('--sqr_norm_lim', type=float, default=1, help='Squared norm limit')
@@ -459,6 +498,7 @@ def main():
             fine_tune_M=args.fine_tune_M,
             optimizer=args.optimizer,
             use_lstm=args.use_lstm,
+            is_bidirectional=args.is_bidirectional,
             use_conv=args.use_conv)
 
   print rnn.train(n_epochs=args.n_epochs, shuffle_batch=args.shuffle_batch)
