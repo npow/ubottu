@@ -245,11 +245,11 @@ class RNN(object):
             l_out = l_recurrent
         
         if use_conv:
-            e_context = l_out.get_output(c_input, c_mask, deterministic=False)
-            e_response = l_out.get_output(r_input, r_mask, deterministic=False)
+            e_context = l_out.get_output(c_input, mask=c_mask, deterministic=False)
+            e_response = l_out.get_output(r_input, mask=r_mask, deterministic=False)
         else:         
-            e_context = l_out.get_output(c_input, c_mask, deterministic=False)[T.arange(batch_size), c_seqlen].reshape((c.shape[0], hidden_size))
-            e_response = l_out.get_output(r_input, r_mask, deterministic=False)[T.arange(batch_size), r_seqlen].reshape((r.shape[0], hidden_size))
+            e_context = l_out.get_output(c_input, mask=c_mask, deterministic=False)[T.arange(batch_size), c_seqlen].reshape((c.shape[0], hidden_size))
+            e_response = l_out.get_output(r_input, mask=r_mask, deterministic=False)[T.arange(batch_size), r_seqlen].reshape((r.shape[0], hidden_size))
             
         dp = T.batched_dot(e_context, T.dot(e_response, self.M.T))
         #dp = pp('dp')(dp)
