@@ -103,8 +103,8 @@ class RNN(object):
         c = T.imatrix('c')
         r = T.imatrix('r')
         y = T.ivector('y')
-        c_mask = T.imatrix('c_mask')
-        r_mask = T.imatrix('r_mask')
+        c_mask = T.fmatrix('c_mask')
+        r_mask = T.fmatrix('r_mask')
         c_seqlen = T.ivector('c_seqlen')
         r_seqlen = T.ivector('r_seqlen')
         embeddings = theano.shared(U, name='embeddings', borrow=True)
@@ -257,8 +257,10 @@ class RNN(object):
         o = T.clip(o, 1e-7, 1.0-1e-7)
 
         self.shared_data = {}
-        for key in ['c', 'r', 'c_mask', 'r_mask']:
+        for key in ['c', 'r']:
             self.shared_data[key] = theano.shared(np.zeros((batch_size, MAX_LEN), dtype=np.int32))
+        for key in ['c_mask', 'r_mask']:
+            self.shared_data[key] = theano.shared(np.zeros((batch_size, MAX_LEN), dtype=theano.config.floatX))
         for key in ['y', 'c_seqlen', 'r_seqlen']: 
             self.shared_data[key] = theano.shared(np.zeros((batch_size,), dtype=np.int32))
         
@@ -311,7 +313,7 @@ class RNN(object):
 
     def get_batch(self, dataset, index, max_l=MAX_LEN):
         seqlen = np.zeros((self.batch_size,), dtype=np.int32)
-        mask = np.zeros((self.batch_size,max_l), dtype=np.int32)
+        mask = np.zeros((self.batch_size,max_l), dtype=theano.config.floatX)
         batch = np.zeros((self.batch_size, max_l), dtype=np.int32)
         data = dataset[index*self.batch_size:(index+1)*self.batch_size]
         for i,row in enumerate(data):
