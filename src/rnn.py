@@ -172,7 +172,7 @@ class RNN(object):
         recurrent_size = hidden_size * 2 if is_bidirectional else hidden_size
         if use_conv:
             l_conv_in = lasagne.layers.InputLayer(shape=(batch_size, img_h, recurrent_size))
-            l_conv_in = lasagne.layers.ReshapeLayer(shape=(batch_size, 1, img_h, recurrent_size))
+            l_conv_in = lasagne.layers.ReshapeLayer(l_conv_in, shape=(batch_size, 1, img_h, recurrent_size))
             conv_layers = []
             for filter_size in filter_sizes:
                 conv_layer = lasagne.layers.Conv2DLayer(
@@ -200,8 +200,8 @@ class RNN(object):
             e_response = l_recurrent.get_output(r_input, mask=r_mask, deterministic=False)
             def step_fn(row_t, mask_t):
                 return row_t * mask_t.reshape((-1, 1))
-            e_context, _ = theano.scan(step_fn, outputs_info=None, sequences=[e_context, c_mask])
-            e_response, _ = theano.scan(step_fn, outputs_info=None, sequences=[e_response, r_mask])
+            e_context, _ = theano.scan(step_fn, outputs_info=None, sequences=[e_context, T.concatenate([c_mask, c_mask], axis=1)])
+            e_response, _ = theano.scan(step_fn, outputs_info=None, sequences=[e_response, T.concatenate([r_mask, r_mask], axis=1)])
 
             e_context = l_out.get_output(e_context, mask=c_mask, deterministic=False)
             e_response = l_out.get_output(e_response, mask=r_mask, deterministic=False)
