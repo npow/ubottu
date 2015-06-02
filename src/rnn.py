@@ -250,8 +250,8 @@ class RNN(object):
 
             def step_fn(row_t, mask_t):
                 return row_t * mask_t.reshape((-1, 1))
-            c_context, _ = theano.scan(step_fn, outputs_info=None, sequences=[c_context, c_mask])
-            r_context, _ = theano.scan(step_fn, outputs_info=None, sequences=[r_context, r_mask])
+            e_context, _ = theano.scan(step_fn, outputs_info=None, sequences=[e_context, c_mask])
+            e_response, _ = theano.scan(step_fn, outputs_info=None, sequences=[e_response, r_mask])
         else:         
             e_context = l_out.get_output(c_input, mask=c_mask, deterministic=False)[T.arange(batch_size), c_seqlen].reshape((c.shape[0], hidden_size))
             e_response = l_out.get_output(r_input, mask=r_mask, deterministic=False)[T.arange(batch_size), r_seqlen].reshape((r.shape[0], hidden_size))
