@@ -2,6 +2,7 @@ from __future__ import division
 import argparse
 import cPickle
 import lasagne
+import lasagne as nn
 import numpy as np
 import pyprind
 import re
@@ -12,6 +13,8 @@ import time
 from collections import defaultdict, OrderedDict
 from theano.ifelse import ifelse
 from theano.printing import Print as pp
+from lasagne import nonlinearities, init, utils
+from lasagne.layers import Layer, InputLayer, DenseLayer, helper
 
 MAX_LEN = 160
 BATCH_SIZE = 256
@@ -69,6 +72,253 @@ def adam(loss, all_params, learning_rate=0.001, b1=0.9, b2=0.999, e=1e-8,
         updates.append((theta_previous, theta) )
     updates.append((t, t + 1.))
     return updates
+
+class MultiplicativeGatingLayer(nn.layers.MergeLayer):
+    """
+    Generic layer that combines its 3 inputs t, h1, h2 as follows:
+    y = t * h1 + (1 - t) * h2
+    """
+    def __init__(self, gate, input1, input2, **kwargs):
+        incomings = [gate, input1, input2]
+        super(MultiplicativeGatingLayer, self).__init__(incomings, **kwargs)
+        assert gate.output_shape == input1.output_shape == input2.output_shape
+    
+    def get_output_shape_for(self, input_shapes):
+        return input_shapes[0]
+    
+    def get_output_for(self, inputs, **kwargs):
+        return inputs[0] * inputs[1] + (1 - inputs[0]) * inputs[2]
+
+def highway_dense(incoming, Wh=nn.init.Orthogonal(), bh=nn.init.Constant(0.0),
+                  Wt=nn.init.Orthogonal(), bt=nn.init.Constant(-4.0),
+                  nonlinearity=nn.nonlinearities.rectify, **kwargs):
+    num_inputs = int(np.prod(incoming.output_shape[1:]))
+    # regular layer
+    l_h = nn.layers.DenseLayer(incoming, num_units=num_inputs, W=Wh, b=bh,
+                               nonlinearity=nonlinearity)
+    # gate layer
+    l_t = nn.layers.DenseLayer(incoming, num_units=num_inputs, W=Wt, b=bt,
+                               nonlinearity=T.nnet.sigmoid)
+    
+    return MultiplicativeGatingLayer(gate=l_t, input1=l_h, input2=incoming)
+
+class CustomRecurrentLayer(Layer):
+    '''
+    A layer which implements a recurrent connection.
+
+    Expects inputs of shape
+        (n_batch, n_time_steps, n_features_1, n_features_2, ...)
+    '''
+    def __init__(self, input_layer, input_to_hidden, hidden_to_hidden,
+                 nonlinearity=nonlinearities.rectify,
+                 hid_init=init.Constant(0.), backwards=False,
+                 learn_init=False, gradient_steps=-1):
+        '''
+        Create a recurrent layer.
+
+        :parameters:
+            - input_layer : nntools.layers.Layer
+                Input to the recurrent layer
+            - input_to_hidden : nntools.layers.Layer
+                Layer which connects input to the hidden state
+            - hidden_to_hidden : nntools.layers.Layer
+                Layer which connects the previous hidden state to the new state
+            - nonlinearity : function or theano.tensor.elemwise.Elemwise
+                Nonlinearity to apply when computing new state
+            - hid_init : function or np.ndarray or theano.shared
+                Initial hidden state
+            - backwards : boolean
+                If True, process the sequence backwards
+            - learn_init : boolean
+                If True, initial hidden values are learned
+            - gradient_steps : int
+                Number of timesteps to include in backpropagated gradient
+                If -1, backpropagate through the entire sequence
+        '''
+        super(CustomRecurrentLayer, self).__init__(input_layer)
+
+        self.input_to_hidden = input_to_hidden
+        self.hidden_to_hidden = hidden_to_hidden
+        self.learn_init = learn_init
+        self.backwards = backwards
+        self.gradient_steps = gradient_steps
+
+        if nonlinearity is None:
+            self.nonlinearity = nonlinearities.identity
+        else:
+            self.nonlinearity = nonlinearity
+
+        # Get the batch size and number of units based on the expected output
+        # of the input-to-hidden layer
+        (n_batch, self.num_units) = self.input_to_hidden.get_output_shape()
+
+        # Initialize hidden state
+        self.hid_init = self.create_param(hid_init, (n_batch, self.num_units))
+
+    def get_params(self):
+        '''
+        Get all parameters of this layer.
+
+        :returns:
+            - params : list of theano.shared
+                List of all parameters
+        '''
+        params = (helper.get_all_params(self.input_to_hidden) +
+                  helper.get_all_params(self.hidden_to_hidden))
+
+        if self.learn_init:
+            return params + self.get_init_params()
+        else:
+            return params
+
+    def get_init_params(self):
+        '''
+        Get all initital parameters of this layer.
+        :returns:
+            - init_params : list of theano.shared
+                List of all initial parameters
+        '''
+        return [self.hid_init]
+
+    def get_bias_params(self):
+        '''
+        Get all bias parameters of this layer.
+
+        :returns:
+            - bias_params : list of theano.shared
+                List of all bias parameters
+        '''
+        return (helper.get_all_bias_params(self.input_to_hidden) +
+                helper.get_all_bias_params(self.hidden_to_hidden))
+
+    def get_output_shape_for(self, input_shape):
+        return (input_shape[0], input_shape[1], self.num_units)
+
+    def get_output_for(self, input, mask=None, *args, **kwargs):
+        '''
+        Compute this layer's output function given a symbolic input variable
+
+        :parameters:
+            - input : theano.TensorType
+                Symbolic input variable
+            - mask : theano.TensorType
+                Theano variable denoting whether each time step in each
+                sequence in the batch is part of the sequence or not.  If None,
+                then it assumed that all sequences are of the same length.  If
+                not all sequences are of the same length, then it must be
+                supplied as a matrix of shape (n_batch, n_time_steps) where
+                `mask[i, j] = 1` when `j <= (length of sequence i)` and
+                `mask[i, j] = 0` when `j > (length of sequence i)`.
+
+        :returns:
+            - layer_output : theano.TensorType
+                Symbolic output variable
+        '''
+        if input.ndim > 3:
+            input = input.reshape((input.shape[0], input.shape[1],
+                                   T.prod(input.shape[2:])))
+
+        # Input should be provided as (n_batch, n_time_steps, n_features)
+        # but scan requires the iterable dimension to be first
+        # So, we need to dimshuffle to (n_time_steps, n_batch, n_features)
+        input = input.dimshuffle(1, 0, 2)
+
+        # Create single recurrent computation step function
+        def step(layer_input, hid_previous):
+            return self.nonlinearity(
+                self.input_to_hidden.get_output(layer_input) +
+                self.hidden_to_hidden.get_output(hid_previous))
+
+        def step_masked(layer_input, mask, hid_previous):
+            # If mask is 0, use previous state until mask = 1 is found.
+            # This propagates the layer initial state when moving backwards
+            # until the end of the sequence is found.
+            hid = (step(layer_input, hid_previous)*mask
+                   + hid_previous*(1 - mask))
+            return [hid]
+
+        if self.backwards and mask is not None:
+            mask = mask.dimshuffle(1, 0, 'x')
+            sequences = [input, mask]
+            step_fun = step_masked
+        else:
+            sequences = input
+            step_fun = step
+
+        output = theano.scan(step_fun, sequences=sequences,
+                             go_backwards=self.backwards,
+                             outputs_info=[self.hid_init],
+                             truncate_gradient=self.gradient_steps)[0]
+
+        # Now, dimshuffle back to (n_batch, n_time_steps, n_features))
+        output = output.dimshuffle(1, 0, 2)
+
+        if self.backwards:
+            output = output[:, ::-1, :]
+
+        return output
+
+
+class RecurrentLayer(CustomRecurrentLayer):
+    '''
+    A "vanilla" RNN layer, which has dense input-to-hidden and
+    hidden-to-hidden connections.
+
+    Expects inputs of shape
+        (n_batch, n_time_steps, n_features_1, n_features_2, ...)
+    '''
+    def __init__(self, input_layer, num_units, W_in_to_hid=init.Uniform(),
+                 W_hid_to_hid=init.Uniform(), b=init.Constant(0.),
+                 nonlinearity=nonlinearities.rectify,
+                 hid_init=init.Constant(0.), backwards=False,
+                 learn_init=False, gradient_steps=-1):
+        '''
+        Create a recurrent layer.
+
+        :parameters:
+            - input_layer : nntools.layers.Layer
+                Input to the recurrent layer
+            - num_units : int
+                Number of hidden units in the layer
+            - W_in_to_hid : function or np.ndarray or theano.shared
+                Initializer for input-to-hidden weight matrix
+            - W_hid_to_hid : function or np.ndarray or theano.shared
+                Initializer for hidden-to-hidden weight matrix
+            - b : function or np.ndarray or theano.shared
+                Initializer for bias vector
+            - nonlinearity : function or theano.tensor.elemwise.Elemwise
+                Nonlinearity to apply when computing new state
+            - hid_init : function or np.ndarray or theano.shared
+                Initial hidden state
+            - backwards : boolean
+                If True, process the sequence backwards
+            - learn_init : boolean
+                If True, initial hidden values are learned
+            - gradient_steps : int
+                Number of timesteps to include in backpropagated gradient
+                If -1, backpropagate through the entire sequence
+        '''
+
+        input_shape = input_layer.get_output_shape()
+        n_batch = input_shape[0]
+        # We will be passing the input at each time step to the dense layer,
+        # so we need to remove the second dimension (the time dimension)
+        in_to_hid = DenseLayer(InputLayer((n_batch,) + input_shape[2:]),
+                               num_units, W=W_in_to_hid, b=b,
+                               nonlinearity=None)
+        in_to_hid = highway_dense(in_to_hid)
+
+        # The hidden-to-hidden layer expects its inputs to have num_units
+        # features because it recycles the previous hidden state
+        hid_to_hid = DenseLayer(InputLayer((n_batch, num_units)),
+                                num_units, W=W_hid_to_hid, b=None,
+                                nonlinearity=None)
+        hid_to_hid = highway_dense(hid_to_hid)
+
+        super(RecurrentLayer, self).__init__(
+            input_layer, in_to_hid, hid_to_hid, nonlinearity=nonlinearity,
+            hid_init=hid_init, backwards=backwards, learn_init=learn_init,
+            gradient_steps=gradient_steps)
 
 class RNN(object):
     def __init__(self,
@@ -200,8 +450,12 @@ class RNN(object):
             e_response = l_recurrent.get_output(r_input, mask=r_mask, deterministic=False)
             def step_fn(row_t, mask_t):
                 return row_t * mask_t.reshape((-1, 1))
-            e_context, _ = theano.scan(step_fn, outputs_info=None, sequences=[e_context, T.concatenate([c_mask, c_mask], axis=1)])
-            e_response, _ = theano.scan(step_fn, outputs_info=None, sequences=[e_response, T.concatenate([r_mask, r_mask], axis=1)])
+            if is_bidirectional:
+                e_context, _ = theano.scan(step_fn, outputs_info=None, sequences=[e_context, T.concatenate([c_mask, c_mask], axis=1)])
+                e_response, _ = theano.scan(step_fn, outputs_info=None, sequences=[e_response, T.concatenate([r_mask, r_mask], axis=1)])
+            else:
+                e_context, _ = theano.scan(step_fn, outputs_info=None, sequences=[e_context, c_mask])
+                e_response, _ = theano.scan(step_fn, outputs_info=None, sequences=[e_response, r_mask])
 
             e_context = l_out.get_output(e_context, mask=c_mask, deterministic=False)
             e_response = l_out.get_output(e_response, mask=r_mask, deterministic=False)
@@ -425,7 +679,7 @@ def str2bool(v):
 def main():
   parser = argparse.ArgumentParser()
   parser.register('type','bool',str2bool)
-  parser.add_argument('--use_conv', type='bool', default=True, help='Use convolutional attention')
+  parser.add_argument('--use_conv', type='bool', default=False, help='Use convolutional attention')
   parser.add_argument('--use_lstm', type='bool', default=False, help='Use LSTMs instead of RNNs')
   parser.add_argument('--hidden_size', type=int, default=200, help='Hidden size')
   parser.add_argument('--fine_tune_W', type='bool', default=False, help='Whether to fine-tune W')
