@@ -335,8 +335,8 @@ class RNN(object):
                  optimizer='adam',
                  filter_sizes=[3,4,5],
                  num_filters=100,
-                 use_conv=False,
-                 use_lstm=True,
+                 conv_attn=False,
+                 encoder='rnn',
                  is_bidirectional=False):
         self.data = data
         self.batch_size = batch_size
@@ -346,7 +346,7 @@ class RNN(object):
         self.lr_decay = lr_decay
         self.optimizer = optimizer
         self.sqr_norm_lim = sqr_norm_lim
-        self.use_conv = use_conv
+        self.conv_attn = conv_attn
         
         img_h = MAX_LEN
         
@@ -362,15 +362,39 @@ class RNN(object):
         zero_vec_tensor = T.fvector()
         self.zero_vec = np.zeros(img_w, dtype=theano.config.floatX)
         self.set_zero = theano.function([zero_vec_tensor], updates=[(embeddings, T.set_subtensor(embeddings[0,:], zero_vec_tensor))])
-        self.M = theano.shared(np.eye(hidden_size).astype(theano.config.floatX), borrow=True)
+        if encoder.find('cnn') > -1 and (encoder.find('rnn') > -1 or encoder.find('lstm') > -1):
+            self.M = theano.shared(np.eye(2*hidden_size).astype(theano.config.floatX), borrow=True)
+        else:
+            self.M = theano.shared(np.eye(hidden_size).astype(theano.config.floatX), borrow=True)
         
         c_input = embeddings[c.flatten()].reshape((c.shape[0], c.shape[1], embeddings.shape[1]))
         r_input = embeddings[r.flatten()].reshape((r.shape[0], r.shape[1], embeddings.shape[1]))                
 
         l_in = lasagne.layers.InputLayer(shape=(batch_size, img_h, img_w))
+
+        if encoder.find('cnn') > -1:
+            l_conv_in = lasagne.layers.ReshapeLayer(l_in, shape=(batch_size, 1, img_h, img_w))
+            conv_layers = []
+            for filter_size in filter_sizes:
+                conv_layer = lasagne.layers.Conv2DLayer(
+                        l_conv_in,
+                        num_filters=num_filters,
+                        filter_size=(filter_size, img_w),
+                        stride=(1,1),
+                        nonlinearity=lasagne.nonlinearities.rectify,
+                        border_mode='valid'
+                        )
+                pool_layer = lasagne.layers.MaxPool2DLayer(
+                        conv_layer,
+                        pool_size=(img_h-filter_size+1, 1)
+                        )
+                conv_layers.append(pool_layer)
+
+            l_conv = lasagne.layers.ConcatLayer(conv_layers)
+            l_conv = lasagne.layers.DenseLayer(l_conv, num_units=hidden_size, nonlinearity=lasagne.nonlinearities.tanh)
         
         if is_bidirectional:
-            if use_lstm:
+            if encoder.find('lstm') > -1:
                 l_fwd = lasagne.layers.LSTMLayer(l_in,
                                                  hidden_size,
                                                  backwards=False,
@@ -403,7 +427,7 @@ class RNN(object):
                 
             l_recurrent = lasagne.layers.ConcatLayer([l_fwd, l_bck])  
         else:
-            if use_lstm:
+            if encoder.find('lstm') > -1:
                 l_recurrent = lasagne.layers.LSTMLayer(l_in,
                                                        hidden_size,
                                                        backwards=False,
@@ -420,13 +444,13 @@ class RNN(object):
                                                             )
         
         recurrent_size = hidden_size * 2 if is_bidirectional else hidden_size
-        if use_conv:
-            l_conv_in = lasagne.layers.InputLayer(shape=(batch_size, img_h, recurrent_size))
-            l_conv_in = lasagne.layers.ReshapeLayer(l_conv_in, shape=(batch_size, 1, img_h, recurrent_size))
+        if conv_attn:
+            l_rconv_in = lasagne.layers.InputLayer(shape=(batch_size, img_h, recurrent_size))
+            l_rconv_in = lasagne.layers.ReshapeLayer(l_rconv_in, shape=(batch_size, 1, img_h, recurrent_size))
             conv_layers = []
             for filter_size in filter_sizes:
                 conv_layer = lasagne.layers.Conv2DLayer(
-                        l_conv_in,
+                        l_rconv_in,
                         num_filters=num_filters,
                         filter_size=(filter_size, recurrent_size),
                         stride=(1,1),
@@ -445,7 +469,7 @@ class RNN(object):
         else:
             l_out = l_recurrent
 
-        if use_conv:
+        if conv_attn:
             e_context = l_recurrent.get_output(c_input, mask=c_mask, deterministic=False)
             e_response = l_recurrent.get_output(r_input, mask=r_mask, deterministic=False)
             def step_fn(row_t, mask_t):
@@ -462,6 +486,16 @@ class RNN(object):
         else:         
             e_context = l_out.get_output(c_input, mask=c_mask, deterministic=False)[T.arange(batch_size), c_seqlen].reshape((c.shape[0], hidden_size))
             e_response = l_out.get_output(r_input, mask=r_mask, deterministic=False)[T.arange(batch_size), r_seqlen].reshape((r.shape[0], hidden_size))
+
+        if encoder.find('cnn') > -1:
+            e_conv_context = l_conv.get_output(c_input, deterministic=False)
+            e_conv_response = l_conv.get_output(r_input, deterministic=False)
+            if encoder.find('rnn') > -1 or encoder.find('lstm') > -1:
+                e_context = T.concatenate([e_context, e_conv_context], axis=1)
+                e_response = T.concatenate([e_response, e_conv_response], axis=1)
+            else:
+                e_context = e_conv_context
+                e_response = e_conv_response
             
         dp = T.batched_dot(e_context, T.dot(e_response, self.M.T))
         #dp = pp('dp')(dp)
@@ -495,7 +529,7 @@ class RNN(object):
 
     def update_params(self):
         params = lasagne.layers.get_all_params(self.l_out)
-        if self.use_conv:
+        if self.conv_attn:
             params += lasagne.layers.get_all_params(self.l_recurrent)
         if self.fine_tune_W:
             params += [self.embeddings]
@@ -679,8 +713,8 @@ def str2bool(v):
 def main():
   parser = argparse.ArgumentParser()
   parser.register('type','bool',str2bool)
-  parser.add_argument('--use_conv', type='bool', default=False, help='Use convolutional attention')
-  parser.add_argument('--use_lstm', type='bool', default=False, help='Use LSTMs instead of RNNs')
+  parser.add_argument('--conv_attn', type='bool', default=False, help='Use convolutional attention')
+  parser.add_argument('--encoder', type=str, default='rnn', help='Encoder')
   parser.add_argument('--hidden_size', type=int, default=200, help='Hidden size')
   parser.add_argument('--fine_tune_W', type='bool', default=False, help='Whether to fine-tune W')
   parser.add_argument('--fine_tune_M', type='bool', default=False, help='Whether to fine-tune M')
@@ -714,9 +748,9 @@ def main():
             fine_tune_W=args.fine_tune_W,
             fine_tune_M=args.fine_tune_M,
             optimizer=args.optimizer,
-            use_lstm=args.use_lstm,
+            encoder=args.encoder,
             is_bidirectional=args.is_bidirectional,
-            use_conv=args.use_conv)
+            conv_attn=args.conv_attn)
 
   print rnn.train(n_epochs=args.n_epochs, shuffle_batch=args.shuffle_batch)
 
