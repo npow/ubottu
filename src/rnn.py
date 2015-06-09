@@ -707,6 +707,16 @@ def sgd_updates_adadelta(cost, params, rho=0.95, epsilon=1e-6, norm_lim=9, word_
             updates[param] = stepped_param      
     return updates
 
+def pad_to_batch_size(X, batch_size):
+    n_seqs = len(X)
+    n_batches_out = np.ceil(float(n_seqs) / batch_size)
+    n_seqs_out = batch_size * n_batches_out
+
+    to_pad = n_seqs % batch_size
+    if to_pad > 0:
+        X += X[:batch_size-to_pad]
+    return X
+
 def str2bool(v):
   return v.lower() in ("yes", "true", "t", "1")
 
@@ -727,19 +737,32 @@ def main():
   parser.add_argument('--lr', type=float, default=0.001, help='Learning rate')
   parser.add_argument('--optimizer', type=str, default='adam', help='Optimizer')
   parser.add_argument('--suffix', type=str, default='', help='Suffix for pkl files')
+  parser.add_argument('--use_pv', type='bool', default=False, help='Use PV')
   args = parser.parse_args()
   print "args: ", args
 
   print "loading data...",
-  train_data, val_data, test_data = cPickle.load(open('dataset%s.pkl' % args.suffix, 'rb'))
-  W, word_idx_map = cPickle.load(open('W%s.pkl' % args.suffix, 'rb'))
+  if args.use_pv:
+      data = cPickle.load(open('../data/all_pv.pkl'))
+      train_data = { 'c': data['c'][:1000000], 'r': data['r'][:1000000], 'y': data['y'][:1000000] }
+      val_data = { 'c': data['c'][1000000:1356080], 'r': data['r'][1000000:1356080], 'y': data['y'][1000000:1356080] }
+      test_data = { 'c': data['c'][1000000+356080:], 'r': data['r'][1000000+356080:], 'y': data['y'][1000000+356080:] }
+
+      for key in ['c', 'r', 'y']:
+          for dataset in [train_data, val_data]:
+              dataset[key] = pad_to_batch_size(dataset[key], BATCH_SIZE)
+
+      W = cPickle.load(open('../data/pv_vectors_10d.txt.pkl', 'rb'))
+  else:
+      train_data, val_data, test_data = cPickle.load(open('dataset%s.pkl' % args.suffix, 'rb'))
+      W, _ = cPickle.load(open('W%s.pkl' % args.suffix, 'rb'))
   print "data loaded!"
 
   data = { 'train' : train_data, 'val': val_data, 'test': test_data }
 
   rnn = RNN(data,
             W.astype(theano.config.floatX),
-            img_w=300,
+            img_w=W.shape[1],
             hidden_size=args.hidden_size,
             batch_size=args.batch_size,
             lr=args.lr,
