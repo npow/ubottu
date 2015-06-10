@@ -18,8 +18,8 @@ def process_file(fname):
                 print "%s: %d" % (fname, i)
             context, response, label = line[0], line[1], int(line[2])
 
-            context_sents = [s.strip() for s in context.split('</s>')]
-            response_sents = [s.strip() for s in response.split('</s>')]
+            context_sents = [s.strip() for s in context.split('__EOS__')]
+            response_sents = [s.strip() for s in response.split('__EOS__')]
 
             for s in context_sents + response_sents:
                 if not s in sent2idx:
