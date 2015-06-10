@@ -15,6 +15,7 @@ from theano.ifelse import ifelse
 from theano.printing import Print as pp
 from lasagne import nonlinearities, init, utils
 from lasagne.layers import Layer, InputLayer, DenseLayer, helper
+sys.setrecursionlimit(10000)
 
 MAX_LEN = 160
 BATCH_SIZE = 256
@@ -54,19 +55,19 @@ def adam(loss, all_params, learning_rate=0.001, b1=0.9, b2=0.999, e=1e-8,
     alpha = learning_rate
     t = theano.shared(np.float32(1))
     b1_t = b1*gamma**(t-1)   #(Decay the first moment running average coefficient)
- 
+
     for theta_previous, g in zip(all_params, all_grads):
         m_previous = theano.shared(np.zeros(theta_previous.get_value().shape,
                                             dtype=theano.config.floatX))
         v_previous = theano.shared(np.zeros(theta_previous.get_value().shape,
                                             dtype=theano.config.floatX))
- 
+
         m = b1_t*m_previous + (1 - b1_t)*g                             # (Update biased first moment estimate)
         v = b2*v_previous + (1 - b2)*g**2                              # (Update biased second raw moment estimate)
         m_hat = m / (1-b1**t)                                          # (Compute bias-corrected first moment estimate)
         v_hat = v / (1-b2**t)                                          # (Compute bias-corrected second raw moment estimate)
         theta = theta_previous - (alpha * m_hat) / (T.sqrt(v_hat) + e) #(Update parameters)
- 
+
         updates.append((m_previous, m))
         updates.append((v_previous, v))
         updates.append((theta_previous, theta) )
@@ -82,10 +83,10 @@ class MultiplicativeGatingLayer(nn.layers.MergeLayer):
         incomings = [gate, input1, input2]
         super(MultiplicativeGatingLayer, self).__init__(incomings, **kwargs)
         assert gate.output_shape == input1.output_shape == input2.output_shape
-    
+
     def get_output_shape_for(self, input_shapes):
         return input_shapes[0]
-    
+
     def get_output_for(self, inputs, **kwargs):
         return inputs[0] * inputs[1] + (1 - inputs[0]) * inputs[2]
 
@@ -99,7 +100,7 @@ def highway_dense(incoming, Wh=nn.init.Orthogonal(), bh=nn.init.Constant(0.0),
     # gate layer
     l_t = nn.layers.DenseLayer(incoming, num_units=num_inputs, W=Wt, b=bt,
                                nonlinearity=T.nnet.sigmoid)
-    
+
     return MultiplicativeGatingLayer(gate=l_t, input1=l_h, input2=incoming)
 
 class CustomRecurrentLayer(Layer):
@@ -337,6 +338,8 @@ class RNN(object):
                  num_filters=100,
                  conv_attn=False,
                  encoder='rnn',
+                 elemwise_sum=True,
+                 penalize_corr=False,
                  is_bidirectional=False):
         self.data = data
         self.batch_size = batch_size
@@ -347,9 +350,9 @@ class RNN(object):
         self.optimizer = optimizer
         self.sqr_norm_lim = sqr_norm_lim
         self.conv_attn = conv_attn
-        
+
         img_h = MAX_LEN
-        
+
         index = T.iscalar()
         c = T.imatrix('c')
         r = T.imatrix('r')
@@ -362,13 +365,13 @@ class RNN(object):
         zero_vec_tensor = T.fvector()
         self.zero_vec = np.zeros(img_w, dtype=theano.config.floatX)
         self.set_zero = theano.function([zero_vec_tensor], updates=[(embeddings, T.set_subtensor(embeddings[0,:], zero_vec_tensor))])
-        if encoder.find('cnn') > -1 and (encoder.find('rnn') > -1 or encoder.find('lstm') > -1):
+        if encoder.find('cnn') > -1 and (encoder.find('rnn') > -1 or encoder.find('lstm') > -1) and not elemwise_sum:
             self.M = theano.shared(np.eye(2*hidden_size).astype(theano.config.floatX), borrow=True)
         else:
             self.M = theano.shared(np.eye(hidden_size).astype(theano.config.floatX), borrow=True)
-        
+
         c_input = embeddings[c.flatten()].reshape((c.shape[0], c.shape[1], embeddings.shape[1]))
-        r_input = embeddings[r.flatten()].reshape((r.shape[0], r.shape[1], embeddings.shape[1]))                
+        r_input = embeddings[r.flatten()].reshape((r.shape[0], r.shape[1], embeddings.shape[1]))
 
         l_in = lasagne.layers.InputLayer(shape=(batch_size, img_h, img_w))
 
@@ -392,7 +395,7 @@ class RNN(object):
 
             l_conv = lasagne.layers.ConcatLayer(conv_layers)
             l_conv = lasagne.layers.DenseLayer(l_conv, num_units=hidden_size, nonlinearity=lasagne.nonlinearities.tanh)
-        
+
         if is_bidirectional:
             if encoder.find('lstm') > -1:
                 l_fwd = lasagne.layers.LSTMLayer(l_in,
@@ -415,7 +418,7 @@ class RNN(object):
                                                       backwards=False,
                                                       learn_init=True
                                                       )
-                
+
                 l_bck = lasagne.layers.RecurrentLayer(l_in,
                                                       hidden_size,
                                                       nonlinearity=lasagne.nonlinearities.tanh,
@@ -424,8 +427,8 @@ class RNN(object):
                                                       backwards=True,
                                                       learn_init=True
                                                       )
-                
-            l_recurrent = lasagne.layers.ConcatLayer([l_fwd, l_bck])  
+
+            l_recurrent = lasagne.layers.ConcatLayer([l_fwd, l_bck])
         else:
             if encoder.find('lstm') > -1:
                 l_recurrent = lasagne.layers.LSTMLayer(l_in,
@@ -442,7 +445,7 @@ class RNN(object):
                                                             backwards=False,
                                                             learn_init=True
                                                             )
-        
+
         recurrent_size = hidden_size * 2 if is_bidirectional else hidden_size
         if conv_attn:
             l_rconv_in = lasagne.layers.InputLayer(shape=(batch_size, img_h, recurrent_size))
@@ -483,7 +486,7 @@ class RNN(object):
 
             e_context = l_out.get_output(e_context, mask=c_mask, deterministic=False)
             e_response = l_out.get_output(e_response, mask=r_mask, deterministic=False)
-        else:         
+        else:
             e_context = l_out.get_output(c_input, mask=c_mask, deterministic=False)[T.arange(batch_size), c_seqlen].reshape((c.shape[0], hidden_size))
             e_response = l_out.get_output(r_input, mask=r_mask, deterministic=False)[T.arange(batch_size), r_seqlen].reshape((r.shape[0], hidden_size))
 
@@ -491,12 +494,26 @@ class RNN(object):
             e_conv_context = l_conv.get_output(c_input, deterministic=False)
             e_conv_response = l_conv.get_output(r_input, deterministic=False)
             if encoder.find('rnn') > -1 or encoder.find('lstm') > -1:
-                e_context = T.concatenate([e_context, e_conv_context], axis=1)
-                e_response = T.concatenate([e_response, e_conv_response], axis=1)
+                if elemwise_sum:
+                    e_context = e_context + e_conv_context
+                    e_response = e_response + e_conv_response
+                else:
+                    e_context = T.concatenate([e_context, e_conv_context], axis=1)
+                    e_response = T.concatenate([e_response, e_conv_response], axis=1)
+
+                # penalize correlation
+                if penalize_corr:
+                    cor = []
+                    for i in range(hidden_size if elemwise_sum else 2*hidden_size):
+                        y1, y2 = e_context, e_response
+                        x1 = y1[:,i] - (np.ones(batch_size)*(T.sum(y1[:,i])/batch_size))
+                        x2 = y2[:,i] - (np.ones(batch_size)*(T.sum(y2[:,i])/batch_size))
+                        nr = T.sum(x1 * x2) / (T.sqrt(T.sum(x1 * x1))*T.sqrt(T.sum(x2 * x2)))
+                        cor.append(-nr)
             else:
                 e_context = e_conv_context
                 e_response = e_conv_response
-            
+
         dp = T.batched_dot(e_context, T.dot(e_response, self.M.T))
         #dp = pp('dp')(dp)
         o = T.nnet.sigmoid(dp)
@@ -507,13 +524,15 @@ class RNN(object):
             self.shared_data[key] = theano.shared(np.zeros((batch_size, MAX_LEN), dtype=np.int32))
         for key in ['c_mask', 'r_mask']:
             self.shared_data[key] = theano.shared(np.zeros((batch_size, MAX_LEN), dtype=theano.config.floatX))
-        for key in ['y', 'c_seqlen', 'r_seqlen']: 
+        for key in ['y', 'c_seqlen', 'r_seqlen']:
             self.shared_data[key] = theano.shared(np.zeros((batch_size,), dtype=np.int32))
-        
+
         self.probas = T.concatenate([(1-o).reshape((-1,1)), o.reshape((-1,1))], axis=1)
         self.pred = T.argmax(self.probas, axis=1)
         self.errors = T.sum(T.neq(self.pred, y))
         self.cost = T.nnet.binary_crossentropy(o, y).mean()
+        if penalize_corr and encoder.find('cnn') > -1 and (encoder.find('rnn') > -1 or encoder.find('lstm') > -1):
+            self.cost += 4 * T.sum(cor)
         self.l_out = l_out
         self.l_recurrent = l_recurrent
         self.embeddings = embeddings
@@ -535,7 +554,7 @@ class RNN(object):
             params += [self.embeddings]
         if self.fine_tune_M:
             params += [self.M]
-            
+
         total_params = sum([p.get_value().size for p in params])
         print "total_params: ", total_params
 
@@ -571,7 +590,7 @@ class RNN(object):
             seqlen[i] = len(row)-1
             mask[i,0:len(row)] = 1
         return batch, seqlen, mask
-    
+
     def set_shared_variables(self, dataset, index):
         c, c_seqlen, c_mask = self.get_batch(dataset['c'], index)
         r, r_seqlen, r_mask = self.get_batch(dataset['r'], index)
@@ -580,9 +599,9 @@ class RNN(object):
         self.shared_data['r'].set_value(r)
         self.shared_data['y'].set_value(y)
         self.shared_data['c_seqlen'].set_value(c_seqlen)
-        self.shared_data['r_seqlen'].set_value(r_seqlen)     
+        self.shared_data['r_seqlen'].set_value(r_seqlen)
         self.shared_data['c_mask'].set_value(c_mask)
-        self.shared_data['r_mask'].set_value(r_mask)     
+        self.shared_data['r_mask'].set_value(r_mask)
 
     def compute_loss(self, dataset, index):
         self.set_shared_variables(dataset, index)
@@ -598,7 +617,7 @@ class RNN(object):
         best_val_rk1 = 0
         test_perf = 0
         cost_epoch = 0
-        
+
         n_train_batches = len(self.data['train']['y']) // self.batch_size
         n_val_batches = len(self.data['val']['y']) // self.batch_size
         n_test_batches = len(self.data['test']['y']) // self.batch_size
@@ -658,7 +677,7 @@ class RNN(object):
                   print 'recall@%d' % k, recall_k[group_size][k]
       return recall_k
 
-    def recall(self, probas, k, group_size):    
+    def recall(self, probas, k, group_size):
         test_size = 10
         n_batches = len(probas) // test_size
         n_correct = 0
@@ -704,7 +723,7 @@ def sgd_updates_adadelta(cost, params, rho=0.95, epsilon=1e-6, norm_lim=9, word_
             scale = desired_norms / (1e-7 + col_norms)
             updates[param] = stepped_param * scale
         else:
-            updates[param] = stepped_param      
+            updates[param] = stepped_param
     return updates
 
 def pad_to_batch_size(X, batch_size):
