@@ -17,9 +17,6 @@ from lasagne import nonlinearities, init, utils
 from lasagne.layers import Layer, InputLayer, DenseLayer, helper
 sys.setrecursionlimit(10000)
 
-MAX_LEN = 160
-BATCH_SIZE = 256
-
 class GradClip(theano.compile.ViewOp):
 
     def __init__(self, clip_lower_bound, clip_upper_bound):
@@ -325,6 +322,7 @@ class RNN(object):
     def __init__(self,
                  data,
                  U,
+                 img_h=160,
                  img_w=300,
                  hidden_size=100,
                  batch_size=50,
@@ -342,6 +340,7 @@ class RNN(object):
                  penalize_corr=False,
                  is_bidirectional=False):
         self.data = data
+        self.img_h = img_h
         self.batch_size = batch_size
         self.fine_tune_W = fine_tune_W
         self.fine_tune_M = fine_tune_M
@@ -350,8 +349,6 @@ class RNN(object):
         self.optimizer = optimizer
         self.sqr_norm_lim = sqr_norm_lim
         self.conv_attn = conv_attn
-
-        img_h = MAX_LEN
 
         index = T.iscalar()
         c = T.imatrix('c')
@@ -521,9 +518,9 @@ class RNN(object):
 
         self.shared_data = {}
         for key in ['c', 'r']:
-            self.shared_data[key] = theano.shared(np.zeros((batch_size, MAX_LEN), dtype=np.int32))
+            self.shared_data[key] = theano.shared(np.zeros((batch_size, img_h), dtype=np.int32))
         for key in ['c_mask', 'r_mask']:
-            self.shared_data[key] = theano.shared(np.zeros((batch_size, MAX_LEN), dtype=theano.config.floatX))
+            self.shared_data[key] = theano.shared(np.zeros((batch_size, img_h), dtype=theano.config.floatX))
         for key in ['y', 'c_seqlen', 'r_seqlen']:
             self.shared_data[key] = theano.shared(np.zeros((batch_size,), dtype=np.int32))
 
@@ -579,7 +576,7 @@ class RNN(object):
         self.get_loss = theano.function([], self.errors, givens=givens, on_unused_input='warn')
         self.get_probas = theano.function([], self.probas, givens=givens, on_unused_input='warn')
 
-    def get_batch(self, dataset, index, max_l=MAX_LEN):
+    def get_batch(self, dataset, index, max_l):
         seqlen = np.zeros((self.batch_size,), dtype=np.int32)
         mask = np.zeros((self.batch_size,max_l), dtype=theano.config.floatX)
         batch = np.zeros((self.batch_size, max_l), dtype=np.int32)
@@ -592,8 +589,8 @@ class RNN(object):
         return batch, seqlen, mask
 
     def set_shared_variables(self, dataset, index):
-        c, c_seqlen, c_mask = self.get_batch(dataset['c'], index)
-        r, r_seqlen, r_mask = self.get_batch(dataset['r'], index)
+        c, c_seqlen, c_mask = self.get_batch(dataset['c'], index, self.img_h)
+        r, r_seqlen, r_mask = self.get_batch(dataset['r'], index, self.img_h)
         y = np.array(dataset['y'][index*self.batch_size:(index+1)*self.batch_size], dtype=np.int32)
         self.shared_data['c'].set_value(c)
         self.shared_data['r'].set_value(r)
@@ -736,6 +733,22 @@ def pad_to_batch_size(X, batch_size):
         X += X[:batch_size-to_pad]
     return X
 
+def get_nrows(fname):
+    with open(fname, 'rb') as f:
+        nrows = 0
+        for _ in f:
+            nrows += 1
+        return nrows
+
+def load_pv_vecs(fname, ndims):
+    nrows = get_nrows(fname)
+    with open(fname, "rb") as f:
+        X = np.zeros((nrows+1, ndims))
+        for i,line in enumerate(f):
+            L = line.strip().split()
+            X[i+1] = np.array(L[1:], dtype='float32')
+        return X
+
 def str2bool(v):
   return v.lower() in ("yes", "true", "t", "1")
 
@@ -747,7 +760,7 @@ def main():
   parser.add_argument('--hidden_size', type=int, default=200, help='Hidden size')
   parser.add_argument('--fine_tune_W', type='bool', default=False, help='Whether to fine-tune W')
   parser.add_argument('--fine_tune_M', type='bool', default=False, help='Whether to fine-tune M')
-  parser.add_argument('--batch_size', type=int, default=BATCH_SIZE, help='Batch size')
+  parser.add_argument('--batch_size', type=int, default=256, help='Batch size')
   parser.add_argument('--shuffle_batch', type='bool', default=False, help='Shuffle batch')
   parser.add_argument('--is_bidirectional', type='bool', default=False, help='Bidirectional RNN/LSTM')
   parser.add_argument('--n_epochs', type=int, default=100, help='Num epochs')
@@ -757,6 +770,8 @@ def main():
   parser.add_argument('--optimizer', type=str, default='adam', help='Optimizer')
   parser.add_argument('--suffix', type=str, default='', help='Suffix for pkl files')
   parser.add_argument('--use_pv', type='bool', default=False, help='Use PV')
+  parser.add_argument('--pv_ndims', type=int, default=100, help='PV ndims')
+  parser.add_argument('--max_seqlen', type=int, default=160, help='Max seqlen')
   args = parser.parse_args()
   print "args: ", args
 
@@ -769,9 +784,10 @@ def main():
 
       for key in ['c', 'r', 'y']:
           for dataset in [train_data, val_data]:
-              dataset[key] = pad_to_batch_size(dataset[key], BATCH_SIZE)
+              dataset[key] = pad_to_batch_size(dataset[key], args.batch_size)
 
-      W = cPickle.load(open('../data/pv_vectors_10d.txt.pkl', 'rb'))
+      W = load_pv_vecs('../data/pv_vectors_%dd.txt' % args.pv_ndims, args.pv_ndims)
+      args.max_seqlen = 21
   else:
       train_data, val_data, test_data = cPickle.load(open('dataset%s.pkl' % args.suffix, 'rb'))
       W, _ = cPickle.load(open('W%s.pkl' % args.suffix, 'rb'))
@@ -781,6 +797,7 @@ def main():
 
   rnn = RNN(data,
             W.astype(theano.config.floatX),
+            img_h=args.max_seqlen,
             img_w=W.shape[1],
             hidden_size=args.hidden_size,
             batch_size=args.batch_size,
