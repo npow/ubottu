@@ -339,6 +339,7 @@ class RNN(object):
                  conv_attn=False,
                  encoder='rnn',
                  elemwise_sum=True,
+                 penalize_corr=False,
                  is_bidirectional=False):
         self.data = data
         self.batch_size = batch_size
@@ -501,13 +502,14 @@ class RNN(object):
                     e_response = T.concatenate([e_response, e_conv_response], axis=1)
 
                 # penalize correlation
-                cor = []
-                for i in range(hidden_size if elemwise_sum else 2*hidden_size):
-                    y1, y2 = e_context, e_response
-                    x1 = y1[:,i] - (np.ones(batch_size)*(T.sum(y1[:,i])/batch_size))
-                    x2 = y2[:,i] - (np.ones(batch_size)*(T.sum(y2[:,i])/batch_size))
-                    nr = T.sum(x1 * x2) / (T.sqrt(T.sum(x1 * x1))*T.sqrt(T.sum(x2 * x2)))
-                    cor.append(-nr)
+                if penalize_corr:
+                    cor = []
+                    for i in range(hidden_size if elemwise_sum else 2*hidden_size):
+                        y1, y2 = e_context, e_response
+                        x1 = y1[:,i] - (np.ones(batch_size)*(T.sum(y1[:,i])/batch_size))
+                        x2 = y2[:,i] - (np.ones(batch_size)*(T.sum(y2[:,i])/batch_size))
+                        nr = T.sum(x1 * x2) / (T.sqrt(T.sum(x1 * x1))*T.sqrt(T.sum(x2 * x2)))
+                        cor.append(-nr)
             else:
                 e_context = e_conv_context
                 e_response = e_conv_response
@@ -529,7 +531,7 @@ class RNN(object):
         self.pred = T.argmax(self.probas, axis=1)
         self.errors = T.sum(T.neq(self.pred, y))
         self.cost = T.nnet.binary_crossentropy(o, y).mean()
-        if encoder.find('cnn') > -1 and (encoder.find('rnn') > -1 or encoder.find('lstm') > -1):
+        if penalize_corr and encoder.find('cnn') > -1 and (encoder.find('rnn') > -1 or encoder.find('lstm') > -1):
             self.cost += 4 * T.sum(cor)
         self.l_out = l_out
         self.l_recurrent = l_recurrent
