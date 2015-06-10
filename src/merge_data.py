@@ -5,6 +5,7 @@ import random
 import sys
 from collections import Counter
 
+SUFFIX = ''
 if len(sys.argv) > 1:
   SUFFIX = sys.argv[1]
   print SUFFIX
@@ -120,57 +121,61 @@ def pad_to_batch_size(X, batch_size):
         X += X[:batch_size-to_pad]
     return X
 
-train_data, train_vocab = cPickle.load(open(TRAIN_FILE))
-val_data, val_vocab = cPickle.load(open(VAL_FILE))
-test_data, test_vocab = cPickle.load(open(TEST_FILE))
+if __name__ == '__main__':
+  main()
 
-vocab = train_vocab + val_vocab + test_vocab
-del train_vocab, val_vocab, test_vocab
+def main():
+    train_data, train_vocab = cPickle.load(open(TRAIN_FILE))
+    val_data, val_vocab = cPickle.load(open(VAL_FILE))
+    test_data, test_vocab = cPickle.load(open(TEST_FILE))
 
-print "data loaded!"
-print "num train: ", len(train_data['y'])
-print "num val: ", len(val_data['y'])
-print "num test: ", len(test_data['y'])
-print "vocab size: ", len(vocab)
+    vocab = train_vocab + val_vocab + test_vocab
+    del train_vocab, val_vocab, test_vocab
 
-print "loading embeddings..."
-#embeddings = load_bin_vec(W2V_FILE, vocab)
-embeddings = load_glove_vec(GLOVE_FILE, vocab)
+    print "data loaded!"
+    print "num train: ", len(train_data['y'])
+    print "num val: ", len(val_data['y'])
+    print "num test: ", len(test_data['y'])
+    print "vocab size: ", len(vocab)
 
-print "embeddings loaded!"
-print "num words with embeddings: ", len(embeddings)
+    print "loading embeddings..."
+    #embeddings = load_bin_vec(W2V_FILE, vocab)
+    embeddings = load_glove_vec(GLOVE_FILE, vocab)
 
-add_unknown_words(embeddings, vocab, min_df=1000)
-W, word_idx_map = get_W(embeddings, k=300)
-print "W: ", W.shape
+    print "embeddings loaded!"
+    print "num words with embeddings: ", len(embeddings)
 
-for key in ['c', 'r', 'y']:
-    for dataset in [train_data, val_data]:
-        dataset[key] = pad_to_batch_size(dataset[key], BATCH_SIZE)
+    add_unknown_words(embeddings, vocab, min_df=1000)
+    W, word_idx_map = get_W(embeddings, k=300)
+    print "W: ", W.shape
 
-make_idx_data(train_data, word_idx_map)
-make_idx_data(val_data, word_idx_map)
-make_idx_data(test_data, word_idx_map)
+    for key in ['c', 'r', 'y']:
+        for dataset in [train_data, val_data]:
+            dataset[key] = pad_to_batch_size(dataset[key], BATCH_SIZE)
 
-for key in ['c', 'r', 'y']:
-    print key
-    for dataset in [train_data, val_data, test_data]:
-        print len(dataset[key])
+    make_idx_data(train_data, word_idx_map)
+    make_idx_data(val_data, word_idx_map)
+    make_idx_data(test_data, word_idx_map)
 
-cPickle.dump([train_data, val_data, test_data], open('dataset%s.pkl' % SUFFIX, 'wb'), protocol=-1)
-del train_data, val_data, test_data
+    for key in ['c', 'r', 'y']:
+        print key
+        for dataset in [train_data, val_data, test_data]:
+            print len(dataset[key])
 
-cPickle.dump([W, word_idx_map], open("W%s.pkl" % SUFFIX, "wb"), protocol=-1)
-del W
+    cPickle.dump([train_data, val_data, test_data], open('dataset%s.pkl' % SUFFIX, 'wb'), protocol=-1)
+    del train_data, val_data, test_data
 
-rand_vecs = {}
-add_unknown_words(rand_vecs, vocab, min_df=1000)
-W2, _ = get_W(rand_vecs, k=300)
-print "W2: ", W2.shape
-cPickle.dump([W2, word_idx_map], open("W2%s.pkl" % SUFFIX, "wb"), protocol=-1)
-del W2
+    cPickle.dump([W, word_idx_map], open("W%s.pkl" % SUFFIX, "wb"), protocol=-1)
+    del W
 
-cPickle.dump(vocab, open('vocab%s.pkl' % SUFFIX, 'wb'), protocol=-1)
-del vocab
+    rand_vecs = {}
+    add_unknown_words(rand_vecs, vocab, min_df=1000)
+    W2, _ = get_W(rand_vecs, k=300)
+    print "W2: ", W2.shape
+    cPickle.dump([W2, word_idx_map], open("W2%s.pkl" % SUFFIX, "wb"), protocol=-1)
+    del W2
 
-print "dataset created!"
+    cPickle.dump(vocab, open('vocab%s.pkl' % SUFFIX, 'wb'), protocol=-1)
+    del vocab
+
+    print "dataset created!"
