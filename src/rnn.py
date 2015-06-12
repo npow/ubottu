@@ -337,7 +337,7 @@ class RNN(object):
                  conv_attn=False,
                  encoder='rnn',
                  elemwise_sum=True,
-                 penalize_corr=False,
+                 corr_penalty=0.0,
                  is_bidirectional=False):
         self.data = data
         self.img_h = img_h
@@ -499,7 +499,7 @@ class RNN(object):
                     e_response = T.concatenate([e_response, e_conv_response], axis=1)
 
                 # penalize correlation
-                if penalize_corr:
+                if abs(corr_penalty) > 0:
                     cor = []
                     for i in range(hidden_size if elemwise_sum else 2*hidden_size):
                         y1, y2 = e_context, e_response
@@ -528,8 +528,8 @@ class RNN(object):
         self.pred = T.argmax(self.probas, axis=1)
         self.errors = T.sum(T.neq(self.pred, y))
         self.cost = T.nnet.binary_crossentropy(o, y).mean()
-        if penalize_corr and encoder.find('cnn') > -1 and (encoder.find('rnn') > -1 or encoder.find('lstm') > -1):
-            self.cost += 4 * T.sum(cor)
+        if abs(corr_penalty) > 0 and encoder.find('cnn') > -1 and (encoder.find('rnn') > -1 or encoder.find('lstm') > -1):
+            self.cost += corr_penalty * T.sum(cor)
         self.l_out = l_out
         self.l_recurrent = l_recurrent
         self.embeddings = embeddings
@@ -772,6 +772,7 @@ def main():
   parser.add_argument('--use_pv', type='bool', default=False, help='Use PV')
   parser.add_argument('--pv_ndims', type=int, default=100, help='PV ndims')
   parser.add_argument('--max_seqlen', type=int, default=160, help='Max seqlen')
+  parser.add_argument('--corr_penalty', type=float, default=0.0, help='Correlation penalty')
   args = parser.parse_args()
   print "args: ", args
 
@@ -809,6 +810,7 @@ def main():
             optimizer=args.optimizer,
             encoder=args.encoder,
             is_bidirectional=args.is_bidirectional,
+            corr_penalty=args.corr_penalty,
             conv_attn=args.conv_attn)
 
   print rnn.train(n_epochs=args.n_epochs, shuffle_batch=args.shuffle_batch)
