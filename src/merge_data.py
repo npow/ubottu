@@ -1,3 +1,4 @@
+import argparse
 import cPickle
 import gzip
 import numpy as np
@@ -5,12 +6,13 @@ import random
 import sys
 from collections import Counter
 
-SUFFIX = ''
-if len(sys.argv) > 1:
-  SUFFIX = sys.argv[1]
-  print SUFFIX
+parser = argparse.ArgumentParser()
+parser.add_argument('--suffix', type=str, default='', help='Suffix')
+parser.add_argument('--output_dir', type=str, default='.', help='Output directory')
+args = parser.parse_args()
 
-TRAIN_FILE = '../data/trainset%s.csv.pkl' % SUFFIX
+TRAIN_FILE = '../data/trainset%s.csv.pkl' % args.suffix
+
 VAL_FILE = '../data/valset.csv.pkl'
 TEST_FILE = '../data/testset.csv.pkl'
 
@@ -121,9 +123,6 @@ def pad_to_batch_size(X, batch_size):
         X += X[:batch_size-to_pad]
     return X
 
-if __name__ == '__main__':
-  main()
-
 def main():
     train_data, train_vocab = cPickle.load(open(TRAIN_FILE))
     val_data, val_vocab = cPickle.load(open(VAL_FILE))
@@ -162,20 +161,24 @@ def main():
         for dataset in [train_data, val_data, test_data]:
             print len(dataset[key])
 
-    cPickle.dump([train_data, val_data, test_data], open('dataset%s.pkl' % SUFFIX, 'wb'), protocol=-1)
+    cPickle.dump([train_data, val_data, test_data], open('%s/dataset%s.pkl' % (args.output_dir, args.suffix), 'wb'), protocol=-1)
     del train_data, val_data, test_data
 
-    cPickle.dump([W, word_idx_map], open("W%s.pkl" % SUFFIX, "wb"), protocol=-1)
+    cPickle.dump([W, word_idx_map], open("%s/W%s.pkl" % (args.output_dir, args.suffix), "wb"), protocol=-1)
     del W
 
     rand_vecs = {}
     add_unknown_words(rand_vecs, vocab, min_df=1000)
     W2, _ = get_W(rand_vecs, k=300)
     print "W2: ", W2.shape
-    cPickle.dump([W2, word_idx_map], open("W2%s.pkl" % SUFFIX, "wb"), protocol=-1)
+    cPickle.dump([W2, word_idx_map], open("%s/W2%s.pkl" % (args.output_dir, args.suffix), "wb"), protocol=-1)
     del W2
 
-    cPickle.dump(vocab, open('vocab%s.pkl' % SUFFIX, 'wb'), protocol=-1)
+    cPickle.dump(vocab, open('%s/vocab%s.pkl' % (args.output_dir, args.suffix), 'wb'), protocol=-1)
     del vocab
 
     print "dataset created!"
+
+if __name__ == '__main__':
+  main()
+
