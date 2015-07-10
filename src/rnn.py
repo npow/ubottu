@@ -16,6 +16,7 @@ from theano.printing import Print as pp
 from lasagne import nonlinearities, init, utils
 from lasagne.layers import Layer, InputLayer, DenseLayer, helper
 sys.setrecursionlimit(10000)
+np.random.seed(42)
 
 class GradClip(theano.compile.ViewOp):
 
@@ -773,6 +774,7 @@ def main():
   parser.add_argument('--pv_ndims', type=int, default=100, help='PV ndims')
   parser.add_argument('--max_seqlen', type=int, default=160, help='Max seqlen')
   parser.add_argument('--corr_penalty', type=float, default=0.0, help='Correlation penalty')
+  parser.add_argument('--input_dir', type=str, default='.', help='Input dir')
   args = parser.parse_args()
   print "args: ", args
 
@@ -790,8 +792,8 @@ def main():
       W = load_pv_vecs('../data/pv_vectors_%dd.txt' % args.pv_ndims, args.pv_ndims)
       args.max_seqlen = 21
   else:
-      train_data, val_data, test_data = cPickle.load(open('dataset%s.pkl' % args.suffix, 'rb'))
-      W, _ = cPickle.load(open('W%s.pkl' % args.suffix, 'rb'))
+      train_data, val_data, test_data = cPickle.load(open('%s/dataset%s.pkl' % (args.input_dir, args.suffix), 'rb'))
+      W, _ = cPickle.load(open('%s/W%s.pkl' % (args.input_dir, args.suffix), 'rb'))
   print "data loaded!"
 
   data = { 'train' : train_data, 'val': val_data, 'test': test_data }

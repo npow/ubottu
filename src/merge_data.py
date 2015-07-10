@@ -5,6 +5,7 @@ import numpy as np
 import random
 import sys
 from collections import Counter
+np.random.seed(42)
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--suffix', type=str, default='', help='Suffix')
