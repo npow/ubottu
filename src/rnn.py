@@ -600,7 +600,7 @@ def main():
 
   print model.train(n_epochs=args.n_epochs, shuffle_batch=args.shuffle_batch)
   if args.save_model:
-      cPickle.dump(model, open(args.model_fname))
+      cPickle.dump(model, open(args.model_fname, 'wb'))
 
 if __name__ == '__main__':
   main()
