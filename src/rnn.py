@@ -803,7 +803,7 @@ def main():
   parser.add_argument('--n_recurrent_layers', type=int, default=1, help='Num recurrent layers')
   parser.add_argument('--input_dir', type=str, default='.', help='Input dir')
   parser.add_argument('--save_model', type='bool', default=False, help='Whether to save the model')
-  parser.add_argument('--model_fname', type=str default='model.pkl', help='Model filename')
+  parser.add_argument('--model_fname', type=str, default='model.pkl', help='Model filename')
   args = parser.parse_args()
   print "args: ", args
 
