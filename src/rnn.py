@@ -339,6 +339,8 @@ class RNN(object):
                  encoder='rnn',
                  elemwise_sum=True,
                  corr_penalty=0.0,
+                 xcov_penalty=0.0,
+                 n_recurrent_layers=1,
                  is_bidirectional=False):
         self.data = data
         self.img_h = img_h
@@ -396,53 +398,64 @@ class RNN(object):
 
         if is_bidirectional:
             if encoder.find('lstm') > -1:
-                l_fwd = lasagne.layers.LSTMLayer(l_in,
-                                                 hidden_size,
-                                                 backwards=False,
-                                                 learn_init=True,
-                                                 peepholes=True)
+                prev_fwd, brev_bck = l_in, l_in
+                for _ in xrange(n_recurrent_layers):
+                    l_fwd = lasagne.layers.LSTMLayer(prev_fwd,
+                                                     hidden_size,
+                                                     backwards=False,
+                                                     learn_init=True,
+                                                     peepholes=True)
 
-                l_bck = lasagne.layers.LSTMLayer(l_in,
-                                                 hidden_size,
-                                                 backwards=True,
-                                                 learn_init=True,
-                                                 peepholes=True)
+                    l_bck = lasagne.layers.LSTMLayer(prev_bck,
+                                                     hidden_size,
+                                                     backwards=True,
+                                                     learn_init=True,
+                                                     peepholes=True)
+                    prev_fwd, prev_bck = l_fwd, l_bck
             else:
-                l_fwd = lasagne.layers.RecurrentLayer(l_in,
-                                                      hidden_size,
-                                                      nonlinearity=lasagne.nonlinearities.tanh,
-                                                      W_hid_to_hid=lasagne.init.Orthogonal(),
-                                                      W_in_to_hid=lasagne.init.Orthogonal(),
-                                                      backwards=False,
-                                                      learn_init=True
-                                                      )
+                prev_fwd, brev_bck = l_in, l_in
+                for _ in xrange(n_recurrent_layers):
+                    l_fwd = lasagne.layers.RecurrentLayer(prev_fwd,
+                                                          hidden_size,
+                                                          nonlinearity=lasagne.nonlinearities.tanh,
+                                                          W_hid_to_hid=lasagne.init.Orthogonal(),
+                                                          W_in_to_hid=lasagne.init.Orthogonal(),
+                                                          backwards=False,
+                                                          learn_init=True
+                                                          )
 
-                l_bck = lasagne.layers.RecurrentLayer(l_in,
-                                                      hidden_size,
-                                                      nonlinearity=lasagne.nonlinearities.tanh,
-                                                      W_hid_to_hid=lasagne.init.Orthogonal(),
-                                                      W_in_to_hid=lasagne.init.Orthogonal(),
-                                                      backwards=True,
-                                                      learn_init=True
-                                                      )
+                    l_bck = lasagne.layers.RecurrentLayer(prev_bck,
+                                                          hidden_size,
+                                                          nonlinearity=lasagne.nonlinearities.tanh,
+                                                          W_hid_to_hid=lasagne.init.Orthogonal(),
+                                                          W_in_to_hid=lasagne.init.Orthogonal(),
+                                                          backwards=True,
+                                                          learn_init=True
+                                                          )
+                    prev_fwd, prev_bck = l_fwd, l_bck
 
             l_recurrent = lasagne.layers.ConcatLayer([l_fwd, l_bck])
         else:
+            prev_fwd = l_in
             if encoder.find('lstm') > -1:
-                l_recurrent = lasagne.layers.LSTMLayer(l_in,
-                                                       hidden_size,
-                                                       backwards=False,
-                                                       learn_init=True,
-                                                       peepholes=True)
+                for _ in xrange(n_recurrent_layers):
+                    l_recurrent = lasagne.layers.LSTMLayer(prev_fwd,
+                                                           hidden_size,
+                                                           backwards=False,
+                                                           learn_init=True,
+                                                           peepholes=True)
+                    prev_fwd = l_recurrent
             else:
-                l_recurrent = lasagne.layers.RecurrentLayer(l_in,
-                                                            hidden_size,
-                                                            nonlinearity=lasagne.nonlinearities.tanh,
-                                                            W_hid_to_hid=lasagne.init.Orthogonal(),
-                                                            W_in_to_hid=lasagne.init.Orthogonal(),
-                                                            backwards=False,
-                                                            learn_init=True
-                                                            )
+                for _ in xrange(n_recurrent_layers):
+                    l_recurrent = lasagne.layers.RecurrentLayer(prev_fwd,
+                                                                hidden_size,
+                                                                nonlinearity=lasagne.nonlinearities.tanh,
+                                                                W_hid_to_hid=lasagne.init.Orthogonal(),
+                                                                W_in_to_hid=lasagne.init.Orthogonal(),
+                                                                backwards=False,
+                                                                learn_init=True
+                                                                )
+                    prev_fwd = l_recurrent
 
         recurrent_size = hidden_size * 2 if is_bidirectional else hidden_size
         if conv_attn:
@@ -508,6 +521,15 @@ class RNN(object):
                         x2 = y2[:,i] - (np.ones(batch_size)*(T.sum(y2[:,i])/batch_size))
                         nr = T.sum(x1 * x2) / (T.sqrt(T.sum(x1 * x1))*T.sqrt(T.sum(x2 * x2)))
                         cor.append(-nr)
+                if abs(xcov_penalty) > 0:
+                    e_context_mean = T.mean(e_context, axis=0, keepdims=True)
+                    e_response_mean = T.mean(e_response, axis=0, keepdims=True)
+                    e_context_centered = e_context - e_context_mean # (n, i)
+                    e_response_centered = e_response - e_response_mean # (n, j)
+                    
+                    outer_prod = (e_context_centered.dimshuffle(0, 1, 'x') *
+                                  e_response_centered.dimshuffle(0, 'x', 1)) # (n, i, j)
+                    xcov = T.sum(T.sqr(T.mean(outer_prod, axis=0)))
             else:
                 e_context = e_conv_context
                 e_response = e_conv_response
@@ -529,8 +551,11 @@ class RNN(object):
         self.pred = T.argmax(self.probas, axis=1)
         self.errors = T.sum(T.neq(self.pred, y))
         self.cost = T.nnet.binary_crossentropy(o, y).mean()
-        if abs(corr_penalty) > 0 and encoder.find('cnn') > -1 and (encoder.find('rnn') > -1 or encoder.find('lstm') > -1):
-            self.cost += corr_penalty * T.sum(cor)
+        if encoder.find('cnn') > -1 and (encoder.find('rnn') > -1 or encoder.find('lstm') > -1):
+            if abs(corr_penalty) > 0:
+                self.cost += corr_penalty * T.sum(cor)
+            if abs(xcov_penalty) > 0:
+                self.cost += xcov_penalty * xcov
         self.l_out = l_out
         self.l_recurrent = l_recurrent
         self.embeddings = embeddings
@@ -774,6 +799,8 @@ def main():
   parser.add_argument('--pv_ndims', type=int, default=100, help='PV ndims')
   parser.add_argument('--max_seqlen', type=int, default=160, help='Max seqlen')
   parser.add_argument('--corr_penalty', type=float, default=0.0, help='Correlation penalty')
+  parser.add_argument('--xcov_penalty', type=float, default=0.0, help='XCov penalty')
+  parser.add_argument('--n_recurrent_layers', type=int, default=1, help='Num recurrent layers')
   parser.add_argument('--input_dir', type=str, default='.', help='Input dir')
   args = parser.parse_args()
   print "args: ", args
@@ -813,6 +840,8 @@ def main():
             encoder=args.encoder,
             is_bidirectional=args.is_bidirectional,
             corr_penalty=args.corr_penalty,
+            xcov_penalty=args.xcov_penalty,
+            n_recurrent_layers=args.n_recurrent_layers,
             conv_attn=args.conv_attn)
 
   print rnn.train(n_epochs=args.n_epochs, shuffle_batch=args.shuffle_batch)
