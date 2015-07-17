@@ -11,7 +11,7 @@ wget http://cs.mcgill.ca/~npow1/data/ubuntu_blobs.tgz
 tar zxvf blobs.tgz
 ```
 
-Note that this code has been heavily modified to support many different models. *To reproduce the numbers in the original paper, use the following incantations.*
+Note that this code has been heavily modified to support many different models. *To reproduce the results in the original paper, use the following incantations.*
 
 RNN:
 ```
