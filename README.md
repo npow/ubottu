@@ -3,6 +3,12 @@ This repository contains the source code for the models used in the following pa
 
 The Ubuntu Dialogue Corpus: A Large Dataset for Research in Unstructured Multi-Turn Dialogue Systems [arXiv:1506.08909](http://arxiv.org/abs/1506.08909). 
 
+#### Dependencies
+* Python 2.7
+* Theano bleeding-edge
+* Lasagne (specifically, [this fork](https://github.com/npow/nntools)). This will be cleaned up when [recurrent layers](https://github.com/Lasagne/Lasagne/issues/17) are merged into Lasagne.
+* Pyprind
+
 #### Usage
 Fetch the pickled data:
 ```
