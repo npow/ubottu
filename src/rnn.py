@@ -150,7 +150,7 @@ class Model(object):
 
         if is_bidirectional:
             if encoder.find('lstm') > -1:
-                prev_fwd, brev_bck = l_in, l_in
+                prev_fwd, prev_bck = l_in, l_in
                 for _ in xrange(n_recurrent_layers):
                     l_fwd = lasagne.layers.LSTMLayer(prev_fwd,
                                                      hidden_size,
@@ -165,7 +165,7 @@ class Model(object):
                                                      peepholes=True)
                     prev_fwd, prev_bck = l_fwd, l_bck
             else:
-                prev_fwd, brev_bck = l_in, l_in
+                prev_fwd, prev_bck = l_in, l_in
                 for _ in xrange(n_recurrent_layers):
                     l_fwd = lasagne.layers.RecurrentLayer(prev_fwd,
                                                           hidden_size,
