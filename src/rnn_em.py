@@ -4,7 +4,7 @@ import theano
 import theano.tensor as T
 from lasagne import init
 from lasagne import nonlinearities
-from lasagne.layers import helper, Gate, InputLayer, Layer
+from lasagne.layers import helper, DenseLayer, Gate, InputLayer, Layer
 from lasagne.utils import unroll_scan
 from theano.printing import Print as pp
 
@@ -19,11 +19,11 @@ def cos_matrix_multiplication(matrix, vector):
     vector_norms = norm(vector)
     matrix_vector_norms = matrix_norms * vector_norms
     neighbors = dotted / matrix_vector_norms
-    return 1 - neighbors
+    return 1. - neighbors
 
-A = theano.shared(np.array([[7, 5, 8, 1, 9], [6, 6, 4, 0, 8]], dtype=np.float32).T)
-B = theano.shared(np.array([1, 2, 3, 4, 5], dtype=np.float32))
-print cos_matrix_multiplication(A, B).eval()
+#A = theano.shared(np.array([[7, 5, 8, 1, 9], [6, 6, 4, 0, 8]], dtype=np.float32).T)
+#B = theano.shared(np.array([1, 2, 3, 4, 5], dtype=np.float32))
+#print cos_matrix_multiplication(A, B).eval()
 
 class CustomRecurrentLayer(Layer):
     """
@@ -101,6 +101,12 @@ class CustomRecurrentLayer(Layer):
                  grad_clipping=False,
                  unroll_scan=False,
                  precompute_input=True,
+                 external_memory_size=None,
+                 hidden_to_k=None,
+                 hidden_to_v=None,
+                 hidden_to_b=None,
+                 hidden_to_e=None,
+                 w_init=init.Uniform(1.),
                  **kwargs):
 
         super(CustomRecurrentLayer, self).__init__(incoming, **kwargs)
@@ -113,6 +119,9 @@ class CustomRecurrentLayer(Layer):
         self.grad_clipping = grad_clipping
         self.unroll_scan = unroll_scan
         self.precompute_input = precompute_input
+        self.external_memory_size = external_memory_size
+        self.g = theano.shared(np.random.uniform(0, 1, size=(self.input_shape[1],1)).astype(theano.config.floatX))
+        self.w_init = None
 
         if unroll_scan and gradient_steps != -1:
             raise ValueError(
@@ -141,6 +150,24 @@ class CustomRecurrentLayer(Layer):
         self.num_inputs = np.prod(self.input_shape[2:])
         self.num_units = input_to_hidden.output_shape[-1]
 
+        if external_memory_size is not None:
+            self.hidden_to_k = hidden_to_k
+            self.hidden_to_v = hidden_to_v
+            self.hidden_to_b = hidden_to_b
+            self.hidden_to_e = hidden_to_e
+            self.M = theano.shared(np.random.uniform(-1, 1, size=external_memory_size).astype(theano.config.floatX), borrow=True)
+
+            if isinstance(w_init, T.TensorVariable):
+                if w_init.ndim != 2:
+                    raise ValueError(
+                        "When w_init is provided as a TensorVariable, it should "
+                        "have 2 dimensions and have shape (num_batch, num_units)")
+                self.w_init = w_init
+            else:
+                self.w_init = self.add_param(
+                    w_init, (1, external_memory_size[1]), name="w_init",
+                    trainable=learn_init, regularizable=False)
+
         # Initialize hidden state
         if isinstance(hid_init, T.TensorVariable):
             if hid_init.ndim != 2:
@@ -151,14 +178,21 @@ class CustomRecurrentLayer(Layer):
         else:
             self.hid_init = self.add_param(
                 hid_init, (1, self.num_units), name="hid_init",
-                trainable=learn_init, regularizable=False)
+                trainable=learn_init if external_memory_size is None else False, regularizable=False)
 
     def get_params(self, **tags):
         # Get all parameters from this layer, the master layer
         params = super(CustomRecurrentLayer, self).get_params(**tags)
         # Combine with all parameters from the child layers
         params += helper.get_all_params(self.input_to_hidden, **tags)
-        params += helper.get_all_params(self.hidden_to_hidden, **tags)
+        if self.external_memory_size is not None:
+            params += helper.get_all_params(self.hidden_to_k, **tags)
+            params += helper.get_all_params(self.hidden_to_v, **tags)
+            params += helper.get_all_params(self.hidden_to_b, **tags)
+            params += helper.get_all_params(self.hidden_to_e, **tags)
+            params += [self.g]
+        else:
+            params += helper.get_all_params(self.hidden_to_hidden, **tags)
         return params
 
     def get_output_shape_for(self, input_shape):
@@ -219,9 +253,68 @@ class CustomRecurrentLayer(Layer):
             non_seqs += helper.get_all_params(self.input_to_hidden)
 
         # Create single recurrent computation step function
-        def step(input_n, hid_previous, *args):
+        def step(input_n, g_t, hid_previous, w_previous=None, M_previous=None, *args):
             # Compute the hidden-to-hidden activation
-            hid_pre = helper.get_output(self.hidden_to_hidden, hid_previous)
+            if self.external_memory_size is not None:
+                g_t = g_t[0]
+                w_previous = w_previous.reshape((num_batch, self.external_memory_size[1]))
+
+                ### EXTERNAL MEMORY READ
+                # eqn 11
+                k = helper.get_output(self.hidden_to_k, hid_previous)
+                k = k.reshape((num_batch, self.external_memory_size[0]))
+
+                # eqn 13
+                beta_pre = helper.get_output(self.hidden_to_b, k)
+                beta = T.log(1 + T.exp(beta_pre))
+                beta = beta.reshape((num_batch, 1))
+
+                # eqn 12
+                def fn1(k_i, *args):
+                    return cos_matrix_multiplication(M_previous, k_i),
+                w_hat, _ = theano.scan(fn1, sequences=k, non_sequences=[M_previous], strict=True)
+                w_hat = w_hat.reshape((num_batch, self.external_memory_size[1]))
+                w_hat = T.exp(beta * w_hat)
+                w_hat /= T.sum(w_hat, axis=1).reshape((-1,1))
+                w_hat = w_hat.reshape((num_batch, self.external_memory_size[1]))
+
+                # eqn 14
+                w_t = (1 - g_t)*w_previous + g_t*w_hat
+                w_t = w_t.reshape((num_batch, self.external_memory_size[1]))
+
+                # eqn 15
+                """
+                def fn2(w_ti, *args):
+                    return T.dot(M_previous, w_ti.reshape((self.external_memory_size[1],))),
+                c, _ = theano.scan(fn2, sequences=w_t, non_sequences=[M_previous], strict=True)
+                """
+                c = T.dot(w_t, M_previous.T)
+                c = c.reshape((num_batch, self.external_memory_size[0]))
+
+                ### EXTERNAL MEMORY UPDATE
+                # eqn 16
+                v = helper.get_output(self.hidden_to_v, hid_previous)
+                v = v.reshape((num_batch, self.external_memory_size[0]))
+
+                # eqn 17
+                e = helper.get_output(self.hidden_to_e, hid_previous)
+                e = e.reshape((num_batch, self.external_memory_size[1]))
+                f = 1. - w_t * e
+
+                # eqn 18
+                def fn3(f_i, v_i, w_ti, *args):
+                    return T.dot(M_previous, T.nlinalg.diag(f_i)) + T.dot(v_i.reshape((-1,1)), w_ti.reshape((1,-1))),
+                M, _ = theano.scan(fn3, sequences=[f, v, w_t], non_sequences=[M_previous], strict=True)
+#                M_tiled = T.tile(M_previous, (num_batch, 1))
+#                f_diag = T.eye(f.shape[1]) * f.dimshuffle(0, 'x', 1)
+#                M = T.batched_dot(M_tiled, f_diag)
+                M_t = T.mean(M, axis=0).reshape(self.external_memory_size)
+
+                hid_pre = c
+            else:
+                hid_pre = helper.get_output(self.hidden_to_hidden, hid_previous)
+                w_t = hid_pre
+                M_t = hid_pre # FIXME
 
             # If the dot product is precomputed then add it, otherwise
             # calculate the input_to_hidden values and add them
@@ -235,15 +328,15 @@ class CustomRecurrentLayer(Layer):
                 hid_pre = theano.gradient.grad_clip(
                     hid_pre, -self.grad_clipping, self.grad_clipping)
 
-            return self.nonlinearity(hid_pre)
+            return [self.nonlinearity(hid_pre), w_t, M_t]
 
-        def step_masked(input_n, mask_n, hid_previous, *args):
+        def step_masked(input_n, mask_n, g_t, hid_previous, w_previous=None, M_previous=None, *args):
             # If mask is 0, use previous state until mask = 1 is found.
             # This propagates the layer initial state when moving backwards
             # until the end of the sequence is found.
-            hid = step(input_n, hid_previous, *args)
+            hid, w_t, M_t = step(input_n, g_t, hid_previous, w_previous, M_previous, *args)
             hid_out = hid*mask_n + hid_previous*(1 - mask_n)
-            return [hid_out]
+            return [hid_out, w_t, M_t]
 
         if mask is not None:
             mask = mask.dimshuffle(1, 0, 'x')
@@ -253,6 +346,14 @@ class CustomRecurrentLayer(Layer):
             sequences = input
             step_fun = step
 
+        if self.external_memory_size is not None:
+            sequences += [self.g]
+            non_seqs += [self.M]
+            non_seqs += helper.get_all_params(self.hidden_to_k)
+            non_seqs += helper.get_all_params(self.hidden_to_v)
+            non_seqs += helper.get_all_params(self.hidden_to_b)
+            non_seqs += helper.get_all_params(self.hidden_to_e)
+
         # When hid_init is provided as a TensorVariable, use it as-is
         if isinstance(self.hid_init, T.TensorVariable):
             hid_init = self.hid_init
@@ -260,23 +361,32 @@ class CustomRecurrentLayer(Layer):
             # Dot against a 1s vector to repeat to shape (num_batch, num_units)
             hid_init = T.dot(T.ones((num_batch, 1)), self.hid_init)
 
+        if self.w_init is None:
+            w_init = hid_init # FIXME
+        else:
+            if isinstance(self.w_init, T.TensorVariable):
+                w_init = self.w_init
+            else:
+                # Dot against a 1s vector to repeat to shape (num_batch, num_units)
+                w_init = T.dot(T.ones((num_batch, 1)), self.w_init)
+
         if self.unroll_scan:
             # Explicitly unroll the recurrence instead of using scan
-            hid_out = unroll_scan(
+            hid_out, _, M = unroll_scan(
                 fn=step_fun,
                 sequences=sequences,
-                outputs_info=[hid_init],
+                outputs_info=[hid_init, w_init, self.M],
                 go_backwards=self.backwards,
                 non_sequences=non_seqs,
                 n_steps=self.input_shape[1])[0]
         else:
             # Scan op iterates over first dimension of input and repeatedly
             # applies the step function
-            hid_out = theano.scan(
+            hid_out, _, M = theano.scan(
                 fn=step_fun,
                 sequences=sequences,
                 go_backwards=self.backwards,
-                outputs_info=[hid_init],
+                outputs_info=[hid_init, w_init, self.M],
                 non_sequences=non_seqs,
                 truncate_gradient=self.gradient_steps,
                 strict=True)[0]
@@ -289,6 +399,7 @@ class CustomRecurrentLayer(Layer):
             hid_out = hid_out[:, ::-1, :]
 
         self.hid_out = hid_out
+        self.M = M
         return hid_out
 
 
@@ -371,6 +482,12 @@ class RecurrentLayer(CustomRecurrentLayer):
                  grad_clipping=False,
                  unroll_scan=False,
                  precompute_input=True,
+                 external_memory_size=None,
+                 W_hid_to_k=init.Uniform(1.),
+                 W_hid_to_v=init.Uniform(1.),
+                 W_hid_to_b=init.Uniform(1.),
+                 W_hid_to_e=init.Uniform(1.),
+                 w_init=init.Uniform(1.),
                  **kwargs):
         input_shape = helper.get_output_shape(incoming)
         num_batch = input_shape[0]
@@ -385,6 +502,30 @@ class RecurrentLayer(CustomRecurrentLayer):
                                 num_units, W=W_hid_to_hid, b=None,
                                 nonlinearity=None, **kwargs)
 
+        if external_memory_size is not None:
+            hid_to_k = DenseLayer(InputLayer((num_batch, num_units)),
+                                  external_memory_size[0], W=W_hid_to_k, b=None,
+                                  nonlinearity=None, **kwargs)
+            print hid_to_k.W.get_value()
+
+            hid_to_v = DenseLayer(InputLayer((num_batch, num_units)),
+                                  external_memory_size[0], W=W_hid_to_v, b=None,
+                                  nonlinearity=None, **kwargs)
+
+            hid_to_b = DenseLayer(InputLayer((num_batch, num_units)),
+                                  1, W=W_hid_to_b, b=None,
+                                  nonlinearity=None, **kwargs)
+
+            hid_to_e = DenseLayer(InputLayer((num_batch, num_units)),
+                                  external_memory_size[1], W=W_hid_to_e, b=None,
+                                  nonlinearity=nonlinearities.sigmoid, **kwargs)
+
+            hid_to_hid = DenseLayer(InputLayer((num_batch, external_memory_size[0])),
+                                    num_units, W=W_hid_to_hid, b=None,
+                                    nonlinearity=None, **kwargs)
+        else:
+            hid_to_k, hid_to_v, hid_to_b, hid_to_e = None, None, None, None
+
         # Make child layer parameters intuitively accessible
         self.W_in_to_hid = in_to_hid.W
         self.W_hid_to_hid = hid_to_hid.W
@@ -396,4 +537,8 @@ class RecurrentLayer(CustomRecurrentLayer):
             hid_init=hid_init, backwards=backwards, learn_init=learn_init,
             gradient_steps=gradient_steps,
             grad_clipping=grad_clipping, unroll_scan=unroll_scan,
-            precompute_input=precompute_input, **kwargs)
+            precompute_input=precompute_input,
+            external_memory_size=external_memory_size,
+            hidden_to_k=hid_to_k, hidden_to_v=hid_to_v,
+            hidden_to_b=hid_to_b, hidden_to_e=hid_to_e,
+            w_init=w_init, **kwargs)
