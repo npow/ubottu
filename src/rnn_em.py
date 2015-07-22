@@ -506,7 +506,6 @@ class RecurrentLayer(CustomRecurrentLayer):
             hid_to_k = DenseLayer(InputLayer((num_batch, num_units)),
                                   external_memory_size[0], W=W_hid_to_k, b=None,
                                   nonlinearity=None, **kwargs)
-            print hid_to_k.W.get_value()
 
             hid_to_v = DenseLayer(InputLayer((num_batch, num_units)),
                                   external_memory_size[0], W=W_hid_to_v, b=None,
