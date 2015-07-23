@@ -166,6 +166,8 @@ class CustomRecurrentLayer(Layer):
                 self.w_init = self.add_param(
                     w_init, (1, external_memory_size[1]), name="w_init",
                     trainable=learn_init, regularizable=False)
+        else:
+            self.g = theano.shared(np.zeros((self.input_shape[1], 1), dtype=theano.config.floatX))
 
         # Initialize hidden state
         if isinstance(hid_init, T.TensorVariable):
@@ -282,11 +284,6 @@ class CustomRecurrentLayer(Layer):
                 w_t = w_t.reshape((num_batch, self.external_memory_size[1]))
 
                 # eqn 15
-                """
-                def fn2(w_ti, *args):
-                    return T.dot(M_previous, w_ti.reshape((self.external_memory_size[1],))),
-                c, _ = theano.scan(fn2, sequences=w_t, non_sequences=[M_previous], strict=True)
-                """
                 c = T.dot(w_t, M_previous.T)
                 c = c.reshape((num_batch, self.external_memory_size[0]))
 
@@ -352,8 +349,8 @@ class CustomRecurrentLayer(Layer):
             # Dot against a 1s vector to repeat to shape (num_batch, num_units)
             hid_init = T.dot(T.ones((num_batch, 1)), self.hid_init)
 
+        sequences += [self.g]
         if self.external_memory_size is not None:
-            sequences += [self.g]
             non_seqs += [self.M]
             non_seqs += helper.get_all_params(self.hidden_to_k)
             non_seqs += helper.get_all_params(self.hidden_to_v)
@@ -367,8 +364,9 @@ class CustomRecurrentLayer(Layer):
                 w_init = T.dot(T.ones((num_batch, 1)), self.w_init)
             outputs_info = [hid_init, w_init, self.M]
         else:
-            sequences += [hid_init] # FIXME
-            outputs_info = [hid_init, hid_init, hid_init] # FIXME
+            # TODO: figure out how to clean this up
+            non_seqs += [self.g]
+            outputs_info = [hid_init, self.g, self.g]
 
         if self.unroll_scan:
             # Explicitly unroll the recurrence instead of using scan
