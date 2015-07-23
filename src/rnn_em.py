@@ -16,7 +16,7 @@ def batch_cdist(matrix, vector):
     dotted = T.dot(vector, matrix.T)
     matrix_norms = batch_norm(matrix)
     vector_norms = batch_norm(vector)
-    matrix_vector_norms = T.dot(vector_norms.reshape((-1,1)), matrix_norms.reshape((1,-1)))
+    matrix_vector_norms = T.dot(vector_norms[:, np.newaxis], matrix_norms[np.newaxis, :])
     neighbors = dotted / matrix_vector_norms
     return 1. - neighbors
 
@@ -253,12 +253,10 @@ class CustomRecurrentLayer(Layer):
             # Compute the hidden-to-hidden activation
             if self.external_memory_size is not None:
                 g_t = g_t[0]
-                w_previous = w_previous.reshape((num_batch, self.external_memory_size[1]))
 
                 ### EXTERNAL MEMORY READ
                 # eqn 11
                 k = helper.get_output(self.hidden_to_k, hid_previous)
-                k = k.reshape((num_batch, self.external_memory_size[0]))
 
                 # eqn 13
                 beta_pre = helper.get_output(self.hidden_to_b, k)
@@ -267,34 +265,28 @@ class CustomRecurrentLayer(Layer):
 
                 # eqn 12
                 w_hat = batch_cdist(M_previous, k)
-                w_hat = w_hat.reshape((num_batch, self.external_memory_size[1]))
                 w_hat = T.exp(beta * w_hat)
                 w_hat /= T.sum(w_hat, axis=1).reshape((-1,1))
-                w_hat = w_hat.reshape((num_batch, self.external_memory_size[1]))
 
                 # eqn 14
                 w_t = (1 - g_t)*w_previous + g_t*w_hat
-                w_t = w_t.reshape((num_batch, self.external_memory_size[1]))
 
                 # eqn 15
                 c = T.dot(w_t, M_previous.T)
-                c = c.reshape((num_batch, self.external_memory_size[0]))
 
                 ### EXTERNAL MEMORY UPDATE
                 # eqn 16
                 v = helper.get_output(self.hidden_to_v, hid_previous)
-                v = v.reshape((num_batch, self.external_memory_size[0]))
 
                 # eqn 17
                 e = helper.get_output(self.hidden_to_e, hid_previous)
-                e = e.reshape((num_batch, self.external_memory_size[1]))
                 f = 1. - w_t * e
 
                 # eqn 18
                 f_diag = T.eye(f.shape[1]) * f.dimshuffle(0, 'x', 1)
                 M_t = T.dot(f_diag, M_previous.T).dimshuffle(0, 2, 1) \
                     + v[:, :, np.newaxis] * w_t[:, np.newaxis, :]
-                M_t = T.mean(M_t, axis=0).reshape(self.external_memory_size)
+                M_t = T.mean(M_t, axis=0)
 
                 hid_pre = c
             else:
