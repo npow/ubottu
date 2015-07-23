@@ -16,7 +16,7 @@ def batch_cdist(matrix, vector):
     dotted = T.dot(vector, matrix.T)
     matrix_norms = batch_norm(matrix)
     vector_norms = batch_norm(vector)
-    matrix_vector_norms = T.dot(vector_norms[:, np.newaxis], matrix_norms[np.newaxis, :])
+    matrix_vector_norms = T.dot(vector_norms.dimshuffle(0, 'x'), matrix_norms.dimshuffle('x', 0))
     neighbors = dotted / matrix_vector_norms
     return 1. - neighbors
 
@@ -266,7 +266,7 @@ class CustomRecurrentLayer(Layer):
                 # eqn 12
                 w_hat = batch_cdist(M_previous, k)
                 w_hat = T.exp(beta * w_hat)
-                w_hat /= T.sum(w_hat, axis=1).reshape((-1,1))
+                w_hat /= T.sum(w_hat, axis=1).dimshuffle(0, 'x')
 
                 # eqn 14
                 w_t = (1 - g_t)*w_previous + g_t*w_hat
@@ -285,7 +285,7 @@ class CustomRecurrentLayer(Layer):
                 # eqn 18
                 f_diag = T.eye(f.shape[1]) * f.dimshuffle(0, 'x', 1)
                 M_t = T.dot(f_diag, M_previous.T).dimshuffle(0, 2, 1) \
-                    + v[:, :, np.newaxis] * w_t[:, np.newaxis, :]
+                    + v.dimshuffle(0, 1, 'x') * w_t.dimshuffle(0, 'x', 1)
                 M_t = T.mean(M_t, axis=0)
 
                 hid_pre = c
