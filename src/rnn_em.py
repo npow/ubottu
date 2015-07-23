@@ -120,8 +120,6 @@ class CustomRecurrentLayer(Layer):
         self.unroll_scan = unroll_scan
         self.precompute_input = precompute_input
         self.external_memory_size = external_memory_size
-        self.g = theano.shared(np.random.uniform(0, 1, size=(self.input_shape[1],1)).astype(theano.config.floatX))
-        self.w_init = None
 
         if unroll_scan and gradient_steps != -1:
             raise ValueError(
@@ -156,6 +154,7 @@ class CustomRecurrentLayer(Layer):
             self.hidden_to_b = hidden_to_b
             self.hidden_to_e = hidden_to_e
             self.M = theano.shared(np.random.uniform(-1, 1, size=external_memory_size).astype(theano.config.floatX), borrow=True)
+            self.g = theano.shared(np.random.uniform(0, 1, size=(self.input_shape[1], 1)).astype(theano.config.floatX))
 
             if isinstance(w_init, T.TensorVariable):
                 if w_init.ndim != 2:
@@ -313,8 +312,8 @@ class CustomRecurrentLayer(Layer):
                 hid_pre = c
             else:
                 hid_pre = helper.get_output(self.hidden_to_hidden, hid_previous)
-                w_t = hid_pre
-                M_t = hid_pre # FIXME
+                w_t = w_previous
+                M_t = M_previous
 
             # If the dot product is precomputed then add it, otherwise
             # calculate the input_to_hidden values and add them
@@ -346,6 +345,13 @@ class CustomRecurrentLayer(Layer):
             sequences = input
             step_fun = step
 
+        # When hid_init is provided as a TensorVariable, use it as-is
+        if isinstance(self.hid_init, T.TensorVariable):
+            hid_init = self.hid_init
+        else:
+            # Dot against a 1s vector to repeat to shape (num_batch, num_units)
+            hid_init = T.dot(T.ones((num_batch, 1)), self.hid_init)
+
         if self.external_memory_size is not None:
             sequences += [self.g]
             non_seqs += [self.M]
@@ -354,28 +360,22 @@ class CustomRecurrentLayer(Layer):
             non_seqs += helper.get_all_params(self.hidden_to_b)
             non_seqs += helper.get_all_params(self.hidden_to_e)
 
-        # When hid_init is provided as a TensorVariable, use it as-is
-        if isinstance(self.hid_init, T.TensorVariable):
-            hid_init = self.hid_init
-        else:
-            # Dot against a 1s vector to repeat to shape (num_batch, num_units)
-            hid_init = T.dot(T.ones((num_batch, 1)), self.hid_init)
-
-        if self.w_init is None:
-            w_init = hid_init # FIXME
-        else:
             if isinstance(self.w_init, T.TensorVariable):
                 w_init = self.w_init
             else:
                 # Dot against a 1s vector to repeat to shape (num_batch, num_units)
                 w_init = T.dot(T.ones((num_batch, 1)), self.w_init)
+            outputs_info = [hid_init, w_init, self.M]
+        else:
+            sequences += [hid_init] # FIXME
+            outputs_info = [hid_init, hid_init, hid_init] # FIXME
 
         if self.unroll_scan:
             # Explicitly unroll the recurrence instead of using scan
             hid_out, _, M = unroll_scan(
                 fn=step_fun,
                 sequences=sequences,
-                outputs_info=[hid_init, w_init, self.M],
+                outputs_info=outputs_info,
                 go_backwards=self.backwards,
                 non_sequences=non_seqs,
                 n_steps=self.input_shape[1])[0]
@@ -386,7 +386,7 @@ class CustomRecurrentLayer(Layer):
                 fn=step_fun,
                 sequences=sequences,
                 go_backwards=self.backwards,
-                outputs_info=[hid_init, w_init, self.M],
+                outputs_info=outputs_info,
                 non_sequences=non_seqs,
                 truncate_gradient=self.gradient_steps,
                 strict=True)[0]
@@ -399,7 +399,8 @@ class CustomRecurrentLayer(Layer):
             hid_out = hid_out[:, ::-1, :]
 
         self.hid_out = hid_out
-        self.M = M
+        if self.external_memory_size is not None:
+            self.M = M
         return hid_out
 
 
