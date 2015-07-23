@@ -485,19 +485,19 @@ class RecurrentLayer(CustomRecurrentLayer):
 
         if external_memory_size is not None:
             hid_to_k = DenseLayer(InputLayer((num_batch, num_units)),
-                                  external_memory_size[0], W=W_hid_to_k, b=None,
+                                  external_memory_size[0], W=W_hid_to_k, b=init.Constant(0.),
                                   nonlinearity=None, **kwargs)
 
             hid_to_v = DenseLayer(InputLayer((num_batch, num_units)),
-                                  external_memory_size[0], W=W_hid_to_v, b=None,
+                                  external_memory_size[0], W=W_hid_to_v, b=init.Constant(0.),
                                   nonlinearity=None, **kwargs)
 
             hid_to_b = DenseLayer(InputLayer((num_batch, num_units)),
-                                  1, W=W_hid_to_b, b=None,
+                                  1, W=W_hid_to_b, b=init.Constant(0.),
                                   nonlinearity=None, **kwargs)
 
             hid_to_e = DenseLayer(InputLayer((num_batch, num_units)),
-                                  external_memory_size[1], W=W_hid_to_e, b=None,
+                                  external_memory_size[1], W=W_hid_to_e, b=init.Constant(0.),
                                   nonlinearity=nonlinearities.sigmoid, **kwargs)
 
             hid_to_hid = DenseLayer(InputLayer((num_batch, external_memory_size[0])),
