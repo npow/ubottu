@@ -8,22 +8,17 @@ from lasagne.layers import helper, DenseLayer, Gate, InputLayer, Layer
 from lasagne.utils import unroll_scan
 from theano.printing import Print as pp
 
-def norm(x):
-    axis = None if x.ndim == 1 else 1
-    return T.sqrt(T.sum(T.sqr(x), axis=axis))
+def batch_norm(x):
+    return T.sqrt(T.sum(T.sqr(x), axis=1))
 
-def cos_matrix_multiplication(matrix, vector):
+def batch_cdist(matrix, vector):
     matrix = matrix.T
-    dotted = T.dot(matrix, vector)
-    matrix_norms = norm(matrix)
-    vector_norms = norm(vector)
-    matrix_vector_norms = matrix_norms * vector_norms
+    dotted = T.dot(vector, matrix.T)
+    matrix_norms = batch_norm(matrix)
+    vector_norms = batch_norm(vector)
+    matrix_vector_norms = T.dot(vector_norms.reshape((-1,1)), matrix_norms.reshape((1,-1)))
     neighbors = dotted / matrix_vector_norms
     return 1. - neighbors
-
-#A = theano.shared(np.array([[7, 5, 8, 1, 9], [6, 6, 4, 0, 8]], dtype=np.float32).T)
-#B = theano.shared(np.array([1, 2, 3, 4, 5], dtype=np.float32))
-#print cos_matrix_multiplication(A, B).eval()
 
 class CustomRecurrentLayer(Layer):
     """
@@ -271,9 +266,7 @@ class CustomRecurrentLayer(Layer):
                 beta = beta.reshape((num_batch, 1))
 
                 # eqn 12
-                def fn1(k_i, *args):
-                    return cos_matrix_multiplication(M_previous, k_i),
-                w_hat, _ = theano.scan(fn1, sequences=k, non_sequences=[M_previous], strict=True)
+                w_hat = batch_cdist(M_previous, k)
                 w_hat = w_hat.reshape((num_batch, self.external_memory_size[1]))
                 w_hat = T.exp(beta * w_hat)
                 w_hat /= T.sum(w_hat, axis=1).reshape((-1,1))
@@ -298,13 +291,10 @@ class CustomRecurrentLayer(Layer):
                 f = 1. - w_t * e
 
                 # eqn 18
-                def fn3(f_i, v_i, w_ti, *args):
-                    return T.dot(M_previous, T.nlinalg.diag(f_i)) + T.dot(v_i.reshape((-1,1)), w_ti.reshape((1,-1))),
-                M, _ = theano.scan(fn3, sequences=[f, v, w_t], non_sequences=[M_previous], strict=True)
-#                M_tiled = T.tile(M_previous, (num_batch, 1))
-#                f_diag = T.eye(f.shape[1]) * f.dimshuffle(0, 'x', 1)
-#                M = T.batched_dot(M_tiled, f_diag)
-                M_t = T.mean(M, axis=0).reshape(self.external_memory_size)
+                f_diag = T.eye(f.shape[1]) * f.dimshuffle(0, 'x', 1)
+                M_t = T.dot(f_diag, M_previous.T).dimshuffle(0, 2, 1) \
+                    + v[:, :, np.newaxis] * w_t[:, np.newaxis, :]
+                M_t = T.mean(M_t, axis=0).reshape(self.external_memory_size)
 
                 hid_pre = c
             else:
