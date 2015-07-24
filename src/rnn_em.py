@@ -14,9 +14,11 @@ def batch_norm(x):
 def batch_cdist(matrix, vector):
     matrix = matrix.T
     dotted = T.dot(vector, matrix.T)
+
     matrix_norms = batch_norm(matrix)
     vector_norms = batch_norm(vector)
-    matrix_vector_norms = T.dot(vector_norms.dimshuffle(0, 'x'), matrix_norms.dimshuffle('x', 0))
+
+    matrix_vector_norms = T.outer(vector_norms, matrix_norms)
     neighbors = dotted / matrix_vector_norms
     return 1. - neighbors
 
@@ -101,7 +103,7 @@ class CustomRecurrentLayer(Layer):
                  hidden_to_v=None,
                  hidden_to_b=None,
                  hidden_to_e=None,
-                 w_init=init.Uniform(1.),
+                 w_init=init.Uniform(.01),
                  **kwargs):
 
         super(CustomRecurrentLayer, self).__init__(incoming, **kwargs)
@@ -464,11 +466,11 @@ class RecurrentLayer(CustomRecurrentLayer):
                  unroll_scan=False,
                  precompute_input=True,
                  external_memory_size=None,
-                 W_hid_to_k=init.Uniform(1.),
-                 W_hid_to_v=init.Uniform(1.),
-                 W_hid_to_b=init.Uniform(1.),
-                 W_hid_to_e=init.Uniform(1.),
-                 w_init=init.Uniform(1.),
+                 W_hid_to_k=init.Uniform(.01),
+                 W_hid_to_v=init.Uniform(.01),
+                 W_hid_to_b=init.Uniform(.01),
+                 W_hid_to_e=init.Uniform(.01),
+                 w_init=init.Uniform(0.01),
                  **kwargs):
         input_shape = helper.get_output_shape(incoming)
         num_batch = input_shape[0]
