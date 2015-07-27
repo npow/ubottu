@@ -33,11 +33,12 @@ class CustomRecurrentLayer(Layer):
     A layer which implements a recurrent connection.
 
     This layer allows you to specify custom input-to-hidden and
-    hidden-to-hidden connections by instantiating layer instances and passing
-    them on initialization.  The output shape for the provided layers must be
-    the same.  If you are looking for a standard, densely-connected recurrent
-    layer, please see :class:`RecurrentLayer`.  The output is computed
-    by
+    hidden-to-hidden connections by instantiating :class:`lasagne.layers.Layer`
+    instances and passing them on initialization.  Note that these connections
+    can consist of multiple layers chained together.  The output shape for the
+    provided input-to-hidden and hidden-to-hidden connections must be the same.
+    If you are looking for a standard, densely-connected recurrent layer,
+    please see :class:`RecurrentLayer`.  The output is computed by
 
     .. math ::
         h_t = \sigma(f_i(x_t) + f_h(h_{t-1}))
@@ -47,10 +48,15 @@ class CustomRecurrentLayer(Layer):
     incoming : a :class:`lasagne.layers.Layer` instance or a tuple
         The layer feeding into this layer, or the expected input shape.
     input_to_hidden : :class:`lasagne.layers.Layer`
-        Layer which connects input to the hidden state (:math:`f_i`).
+        :class:`lasagne.layers.Layer` instance which connects input to the
+        hidden state (:math:`f_i`).  This layer may be connected to a chain of
+        layers, which must end in a :class:`lasagne.layers.InputLayer` with the
+        same input shape as `incoming`.
     hidden_to_hidden : :class:`lasagne.layers.Layer`
         Layer which connects the previous hidden state to the new state
-        (:math:`f_h`).
+        (:math:`f_h`).  This layer may be connected to a chain of layers, which
+        must end in a :class:`lasagne.layers.InputLayer` with the same input
+        shape as `hidden_to_hidden`'s output shape.
     nonlinearity : callable or None
         Nonlinearity to apply when computing new state (:math:`\sigma`). If
         None is provided, no nonlinearity will be applied.
@@ -76,13 +82,31 @@ class CustomRecurrentLayer(Layer):
     unroll_scan : bool
         If True the recursion is unrolled instead of using scan. For some
         graphs this gives a significant speed up but it might also consume
-        more memory. When `unroll_scan` is true then the `gradient_steps`
-        setting is ignored. The input sequence length cannot be specified as
-        None when `unroll_scan` is True.
+        more memory. When `unroll_scan` is True, backpropagation always
+        includes the full sequence, so `gradient_steps` must be set to -1 and
+        the input sequence length must be known at compile time (i.e., cannot
+        be given as None).
     precompute_input : bool
         If True, precompute input_to_hid before iterating through
         the sequence. This can result in a speedup at the expense of
         an increase in memory usage.
+
+    Examples
+    --------
+
+    The following example constructs a simple `CustomRecurrentLayer` which
+    has dense input-to-hidden and hidden-to-hidden connections.
+
+    >>> import lasagne
+    >>> n_batch, n_steps, n_in = (2, 3, 4)
+    >>> n_hid = 5
+    >>> l_in = lasagne.layers.InputLayer((n_batch, n_steps, n_in))
+    >>> l_in_hid = lasagne.layers.DenseLayer(
+    ...     lasagne.layers.InputLayer((None, n_in)), n_hid)
+    >>> l_hid_hid = lasagne.layers.DenseLayer(
+    ...     lasagne.layers.InputLayer((None, n_hid)), n_hid)
+    >>> l_rec = lasagne.layers.CustomRecurrentLayer(l_in, l_in_hid, l_hid_hid)
+
 
     References
     ----------
@@ -103,6 +127,7 @@ class CustomRecurrentLayer(Layer):
                  hidden_to_v=None,
                  hidden_to_b=None,
                  hidden_to_e=None,
+                 input_to_g=None,
                  w_init=init.Uniform(.01),
                  **kwargs):
 
@@ -115,8 +140,9 @@ class CustomRecurrentLayer(Layer):
         self.gradient_steps = gradient_steps
         self.grad_clipping = grad_clipping
         self.unroll_scan = unroll_scan
-        self.precompute_input = precompute_input
+        self.precompute_input = False if external_memory_size is not None else precompute_input
         self.external_memory_size = external_memory_size
+        self.dummy = theano.shared(np.zeros((self.input_shape[0], self.input_shape[1], 1), dtype=theano.config.floatX))
 
         if unroll_scan and gradient_steps != -1:
             raise ValueError(
@@ -150,8 +176,8 @@ class CustomRecurrentLayer(Layer):
             self.hidden_to_v = hidden_to_v
             self.hidden_to_b = hidden_to_b
             self.hidden_to_e = hidden_to_e
-            self.M = theano.shared(np.random.uniform(-1, 1, size=external_memory_size).astype(theano.config.floatX), borrow=True)
-            self.g = theano.shared(np.random.uniform(0, 1, size=(self.input_shape[1], 1)).astype(theano.config.floatX))
+            self.input_to_g = input_to_g
+            self.M = theano.shared(np.random.uniform(-1., 1., size=external_memory_size).astype(theano.config.floatX), borrow=True)
 
             if isinstance(w_init, T.TensorVariable):
                 if w_init.ndim != 2:
@@ -163,8 +189,6 @@ class CustomRecurrentLayer(Layer):
                 self.w_init = self.add_param(
                     w_init, (1, external_memory_size[1]), name="w_init",
                     trainable=learn_init, regularizable=False)
-        else:
-            self.g = theano.shared(np.zeros((self.input_shape[1], 1), dtype=theano.config.floatX))
 
         # Initialize hidden state
         if isinstance(hid_init, T.TensorVariable):
@@ -188,7 +212,7 @@ class CustomRecurrentLayer(Layer):
             params += helper.get_all_params(self.hidden_to_v, **tags)
             params += helper.get_all_params(self.hidden_to_b, **tags)
             params += helper.get_all_params(self.hidden_to_e, **tags)
-            params += [self.g]
+            params += helper.get_all_params(self.input_to_g, **tags)
         else:
             params += helper.get_all_params(self.hidden_to_hidden, **tags)
         return params
@@ -251,10 +275,10 @@ class CustomRecurrentLayer(Layer):
             non_seqs += helper.get_all_params(self.input_to_hidden)
 
         # Create single recurrent computation step function
-        def step(input_n, g_t, hid_previous, w_previous=None, M_previous=None, *args):
+        def step(input_n, hid_previous, w_previous=None, M_previous=None, *args):
             # Compute the hidden-to-hidden activation
             if self.external_memory_size is not None:
-                g_t = g_t[0]
+                g_t = helper.get_output(self.input_to_g, input_n).reshape((num_batch, 1))
 
                 ### EXTERNAL MEMORY READ
                 # eqn 11
@@ -310,11 +334,11 @@ class CustomRecurrentLayer(Layer):
 
             return [self.nonlinearity(hid_pre), w_t, M_t]
 
-        def step_masked(input_n, mask_n, g_t, hid_previous, w_previous=None, M_previous=None, *args):
+        def step_masked(input_n, mask_n, hid_previous, w_previous=None, M_previous=None, *args):
             # If mask is 0, use previous state until mask = 1 is found.
             # This propagates the layer initial state when moving backwards
             # until the end of the sequence is found.
-            hid, w_t, M_t = step(input_n, g_t, hid_previous, w_previous, M_previous, *args)
+            hid, w_t, M_t = step(input_n, hid_previous, w_previous, M_previous, *args)
             hid_out = hid*mask_n + hid_previous*(1 - mask_n)
             return [hid_out, w_t, M_t]
 
@@ -333,13 +357,13 @@ class CustomRecurrentLayer(Layer):
             # Dot against a 1s vector to repeat to shape (num_batch, num_units)
             hid_init = T.dot(T.ones((num_batch, 1)), self.hid_init)
 
-        sequences += [self.g]
         if self.external_memory_size is not None:
             non_seqs += [self.M]
             non_seqs += helper.get_all_params(self.hidden_to_k)
             non_seqs += helper.get_all_params(self.hidden_to_v)
             non_seqs += helper.get_all_params(self.hidden_to_b)
             non_seqs += helper.get_all_params(self.hidden_to_e)
+            non_seqs += helper.get_all_params(self.input_to_g)
 
             if isinstance(self.w_init, T.TensorVariable):
                 w_init = self.w_init
@@ -349,8 +373,7 @@ class CustomRecurrentLayer(Layer):
             outputs_info = [hid_init, w_init, self.M]
         else:
             # TODO: figure out how to clean this up
-            non_seqs += [self.g]
-            outputs_info = [hid_init, self.g, self.g]
+            outputs_info = [hid_init, self.dummy, self.dummy]
 
         if self.unroll_scan:
             # Explicitly unroll the recurrence instead of using scan
@@ -401,7 +424,7 @@ class RecurrentLayer(CustomRecurrentLayer):
     hidden-to-hidden connections.  The output is computed as
 
     .. math ::
-        h_t = \sigma(W_x x_t + W_h h_{t-1} + b)
+        h_t = \sigma(x_t W_x + h_{t-1} W_h + b)
 
     Parameters
     ----------
@@ -440,9 +463,10 @@ class RecurrentLayer(CustomRecurrentLayer):
     unroll_scan : bool
         If True the recursion is unrolled instead of using scan. For some
         graphs this gives a significant speed up but it might also consume
-        more memory. When `unroll_scan` is true then the `gradient_steps`
-        setting is ignored. The input sequence length cannot be specified as
-        None when `unroll_scan` is True.
+        more memory. When `unroll_scan` is True, backpropagation always
+        includes the full sequence, so `gradient_steps` must be set to -1 and
+        the input sequence length must be known at compile time (i.e., cannot
+        be given as None).
     precompute_input : bool
         If True, precompute input_to_hid before iterating through
         the sequence. This can result in a speedup at the expense of
@@ -470,7 +494,8 @@ class RecurrentLayer(CustomRecurrentLayer):
                  W_hid_to_v=init.Uniform(.01),
                  W_hid_to_b=init.Uniform(.01),
                  W_hid_to_e=init.Uniform(.01),
-                 w_init=init.Uniform(0.01),
+                 W_in_to_g=init.Uniform(.01),
+                 w_init=init.Uniform(.01),
                  **kwargs):
         input_shape = helper.get_output_shape(incoming)
         num_batch = input_shape[0]
@@ -502,11 +527,15 @@ class RecurrentLayer(CustomRecurrentLayer):
                                   external_memory_size[1], W=W_hid_to_e, b=init.Constant(0.),
                                   nonlinearity=nonlinearities.sigmoid, **kwargs)
 
+            in_to_g = DenseLayer(InputLayer((num_batch, input_shape[2])),
+                                  1, W=W_in_to_g, b=init.Constant(0.),
+                                  nonlinearity=nonlinearities.sigmoid, **kwargs)
+
             hid_to_hid = DenseLayer(InputLayer((num_batch, external_memory_size[0])),
                                     num_units, W=W_hid_to_hid, b=None,
                                     nonlinearity=None, **kwargs)
         else:
-            hid_to_k, hid_to_v, hid_to_b, hid_to_e = None, None, None, None
+            hid_to_k, hid_to_v, hid_to_b, hid_to_e, in_to_g = None, None, None, None, None
 
         # Make child layer parameters intuitively accessible
         self.W_in_to_hid = in_to_hid.W
@@ -523,4 +552,4 @@ class RecurrentLayer(CustomRecurrentLayer):
             external_memory_size=external_memory_size,
             hidden_to_k=hid_to_k, hidden_to_v=hid_to_v,
             hidden_to_b=hid_to_b, hidden_to_e=hid_to_e,
-            w_init=w_init, **kwargs)
+            input_to_g=in_to_g, w_init=w_init, **kwargs)
