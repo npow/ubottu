@@ -15,6 +15,7 @@ from theano.ifelse import ifelse
 from theano.printing import Print as pp
 from lasagne import nonlinearities, init, utils
 from lasagne.layers import Layer, InputLayer, DenseLayer, helper
+from rnn_em import RecurrentLayer
 sys.setrecursionlimit(10000)
 np.random.seed(42)
 
@@ -40,6 +41,7 @@ class Model(object):
                  corr_penalty=0.0,
                  xcov_penalty=0.0,
                  n_recurrent_layers=1,
+                 n_memory_slots=0,
                  is_bidirectional=False):
         self.data = data
         self.img_h = img_h
@@ -51,6 +53,7 @@ class Model(object):
         self.optimizer = optimizer
         self.sqr_norm_lim = sqr_norm_lim
         self.conv_attn = conv_attn
+        self.external_memory_size = (hidden_size, n_memory_slots) if n_memory_slots > 0 else None
 
         index = T.iscalar()
         c = T.imatrix('c')
@@ -114,23 +117,27 @@ class Model(object):
             else:
                 prev_fwd, prev_bck = l_in, l_in
                 for _ in xrange(n_recurrent_layers):
-                    l_fwd = lasagne.layers.RecurrentLayer(prev_fwd,
-                                                          hidden_size,
-                                                          nonlinearity=lasagne.nonlinearities.tanh,
-                                                          W_hid_to_hid=lasagne.init.Orthogonal(),
-                                                          W_in_to_hid=lasagne.init.Orthogonal(),
-                                                          backwards=False,
-                                                          learn_init=True
-                                                          )
+                    l_fwd = RecurrentLayer(prev_fwd,
+                                           hidden_size,
+                                           nonlinearity=lasagne.nonlinearities.tanh,
+                                           W_hid_to_hid=lasagne.init.Orthogonal(),
+                                           W_in_to_hid=lasagne.init.Orthogonal(),
+                                           external_memory_size=self.external_memory_size,
+                                           hid_init=lasagne.init.Uniform(1.),
+                                           backwards=False,
+                                           learn_init=True
+                                           )
 
-                    l_bck = lasagne.layers.RecurrentLayer(prev_bck,
-                                                          hidden_size,
-                                                          nonlinearity=lasagne.nonlinearities.tanh,
-                                                          W_hid_to_hid=lasagne.init.Orthogonal(),
-                                                          W_in_to_hid=lasagne.init.Orthogonal(),
-                                                          backwards=True,
-                                                          learn_init=True
-                                                          )
+                    l_bck = RecurrentLayer(prev_bck,
+                                           hidden_size,
+                                           nonlinearity=lasagne.nonlinearities.tanh,
+                                           W_hid_to_hid=lasagne.init.Orthogonal(),
+                                           W_in_to_hid=lasagne.init.Orthogonal(),
+                                           external_memory_size=self.external_memory_size,
+                                           hid_init=lasagne.init.Uniform(1.),
+                                           backwards=True,
+                                           learn_init=True
+                                           )
                     prev_fwd, prev_bck = l_fwd, l_bck
 
             l_recurrent = lasagne.layers.ConcatLayer([l_fwd, l_bck])
@@ -146,14 +153,16 @@ class Model(object):
                     prev_fwd = l_recurrent
             else:
                 for _ in xrange(n_recurrent_layers):
-                    l_recurrent = lasagne.layers.RecurrentLayer(prev_fwd,
-                                                                hidden_size,
-                                                                nonlinearity=lasagne.nonlinearities.tanh,
-                                                                W_hid_to_hid=lasagne.init.Orthogonal(),
-                                                                W_in_to_hid=lasagne.init.Orthogonal(),
-                                                                backwards=False,
-                                                                learn_init=True
-                                                                )
+                    l_recurrent = RecurrentLayer(prev_fwd,
+                                                 hidden_size,
+                                                 nonlinearity=lasagne.nonlinearities.tanh,
+                                                 W_hid_to_hid=lasagne.init.Orthogonal(),
+                                                 W_in_to_hid=lasagne.init.Orthogonal(),
+                                                 external_memory_size=self.external_memory_size,
+                                                 hid_init=lasagne.init.Uniform(1.),
+                                                 backwards=False,
+                                                 learn_init=True
+                                                 )
                     prev_fwd = l_recurrent
 
         recurrent_size = hidden_size * 2 if is_bidirectional else hidden_size
@@ -463,6 +472,7 @@ def main():
   parser.add_argument('--corr_penalty', type=float, default=0.0, help='Correlation penalty')
   parser.add_argument('--xcov_penalty', type=float, default=0.0, help='XCov penalty')
   parser.add_argument('--n_recurrent_layers', type=int, default=1, help='Num recurrent layers')
+  parser.add_argument('--n_memory_slots', type=int, default=0, help='Num memory slots')
   parser.add_argument('--input_dir', type=str, default='.', help='Input dir')
   parser.add_argument('--save_model', type='bool', default=False, help='Whether to save the model')
   parser.add_argument('--model_fname', type=str, default='model.pkl', help='Model filename')
@@ -506,6 +516,7 @@ def main():
                 corr_penalty=args.corr_penalty,
                 xcov_penalty=args.xcov_penalty,
                 n_recurrent_layers=args.n_recurrent_layers,
+                n_memory_slots=args.n_memory_slots,
                 conv_attn=args.conv_attn)
 
   print model.train(n_epochs=args.n_epochs, shuffle_batch=args.shuffle_batch)
