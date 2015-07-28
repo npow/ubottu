@@ -58,15 +58,14 @@ class Model(object):
         r_mask = T.fmatrix('r_mask')
         c_seqlen = T.ivector('c_seqlen')
         r_seqlen = T.ivector('r_seqlen')
-        embeddings = T.fmatrix()
-        embeddings_shared = theano.shared(U, name='embeddings', borrow=True)
+        embeddings = theano.shared(U, name='embeddings', borrow=True)
         zero_vec_tensor = T.fvector()
         self.zero_vec = np.zeros(img_w, dtype=theano.config.floatX)
-        self.set_zero = theano.function([zero_vec_tensor], updates=[(embeddings_shared, T.set_subtensor(embeddings_shared[0,:], zero_vec_tensor))])
+        self.set_zero = theano.function([zero_vec_tensor], updates=[(embeddings, T.set_subtensor(embeddings[0,:], zero_vec_tensor))])
         self.M = theano.shared(np.eye(hidden_size).astype(theano.config.floatX), borrow=True)
 
-        c_input = embeddings[c.flatten()].reshape((c.shape[0], c.shape[1], U.shape[1]))
-        r_input = embeddings[r.flatten()].reshape((r.shape[0], r.shape[1], U.shape[1]))
+        c_input = embeddings[c.flatten()].reshape((batch_size, img_h, img_w))
+        r_input = embeddings[r.flatten()].reshape((batch_size, img_h, img_w))
 
         l_in = lasagne.layers.InputLayer(shape=(batch_size, img_h, img_w))
 
@@ -165,7 +164,6 @@ class Model(object):
         self.l_out = l_out
         self.l_recurrent = l_recurrent
         self.embeddings = embeddings
-        self.embeddings_shared = embeddings_shared
         self.c = c
         self.r = r
         self.y = y
@@ -179,7 +177,7 @@ class Model(object):
     def update_params(self):
         params = lasagne.layers.get_all_params(self.l_out)
         if self.fine_tune_W:
-            params += [self.embeddings_shared]
+            params += [self.embeddings]
         if self.fine_tune_M:
             params += [self.M]
 
@@ -200,8 +198,7 @@ class Model(object):
             self.c_seqlen: self.shared_data['c_seqlen'],
             self.r_seqlen: self.shared_data['r_seqlen'],
             self.c_mask: self.shared_data['c_mask'],
-            self.r_mask: self.shared_data['r_mask'],
-            self.embeddings: self.embeddings_shared
+            self.r_mask: self.shared_data['r_mask']
         }
         self.train_model = theano.function([], self.cost, updates=updates, givens=givens, on_unused_input='warn')
         self.get_loss = theano.function([], self.errors, givens=givens, on_unused_input='warn')

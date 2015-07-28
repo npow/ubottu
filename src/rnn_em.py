@@ -394,7 +394,7 @@ class CustomRecurrentLayer(Layer):
                 outputs_info=outputs_info,
                 non_sequences=non_seqs,
                 truncate_gradient=self.gradient_steps,
-                strict=True)[0]
+                strict=False)[0]
 
         # dimshuffle back to (n_batch, n_time_steps, n_features))
         hid_out = hid_out.dimshuffle(1, 0, 2)
