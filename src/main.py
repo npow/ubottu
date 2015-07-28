@@ -35,11 +35,8 @@ class Model(object):
                  optimizer='adam',
                  filter_sizes=[3,4,5],
                  num_filters=100,
-                 conv_attn=False,
                  encoder='rnn',
                  elemwise_sum=True,
-                 corr_penalty=0.0,
-                 xcov_penalty=0.0,
                  n_recurrent_layers=1,
                  n_memory_slots=0,
                  is_bidirectional=False):
@@ -52,10 +49,8 @@ class Model(object):
         self.lr_decay = lr_decay
         self.optimizer = optimizer
         self.sqr_norm_lim = sqr_norm_lim
-        self.conv_attn = conv_attn
         self.external_memory_size = (hidden_size, n_memory_slots) if n_memory_slots > 0 else None
 
-        index = T.iscalar()
         c = T.imatrix('c')
         r = T.imatrix('r')
         y = T.ivector('y')
@@ -63,40 +58,17 @@ class Model(object):
         r_mask = T.fmatrix('r_mask')
         c_seqlen = T.ivector('c_seqlen')
         r_seqlen = T.ivector('r_seqlen')
-        embeddings = theano.shared(U, name='embeddings', borrow=True)
+        embeddings = T.fmatrix()
+        embeddings_shared = theano.shared(U, name='embeddings', borrow=True)
         zero_vec_tensor = T.fvector()
         self.zero_vec = np.zeros(img_w, dtype=theano.config.floatX)
-        self.set_zero = theano.function([zero_vec_tensor], updates=[(embeddings, T.set_subtensor(embeddings[0,:], zero_vec_tensor))])
-        if encoder.find('cnn') > -1 and (encoder.find('rnn') > -1 or encoder.find('lstm') > -1) and not elemwise_sum:
-            self.M = theano.shared(np.eye(2*hidden_size).astype(theano.config.floatX), borrow=True)
-        else:
-            self.M = theano.shared(np.eye(hidden_size).astype(theano.config.floatX), borrow=True)
+        self.set_zero = theano.function([zero_vec_tensor], updates=[(embeddings_shared, T.set_subtensor(embeddings_shared[0,:], zero_vec_tensor))])
+        self.M = theano.shared(np.eye(hidden_size).astype(theano.config.floatX), borrow=True)
 
-        c_input = embeddings[c.flatten()].reshape((c.shape[0], c.shape[1], embeddings.shape[1]))
-        r_input = embeddings[r.flatten()].reshape((r.shape[0], r.shape[1], embeddings.shape[1]))
+        c_input = embeddings[c.flatten()].reshape((c.shape[0], c.shape[1], U.shape[1]))
+        r_input = embeddings[r.flatten()].reshape((r.shape[0], r.shape[1], U.shape[1]))
 
         l_in = lasagne.layers.InputLayer(shape=(batch_size, img_h, img_w))
-
-        if encoder.find('cnn') > -1:
-            l_conv_in = lasagne.layers.ReshapeLayer(l_in, shape=(batch_size, 1, img_h, img_w))
-            conv_layers = []
-            for filter_size in filter_sizes:
-                conv_layer = lasagne.layers.Conv2DLayer(
-                        l_conv_in,
-                        num_filters=num_filters,
-                        filter_size=(filter_size, img_w),
-                        stride=(1,1),
-                        nonlinearity=lasagne.nonlinearities.rectify,
-                        border_mode='valid'
-                        )
-                pool_layer = lasagne.layers.MaxPool2DLayer(
-                        conv_layer,
-                        pool_size=(img_h-filter_size+1, 1)
-                        )
-                conv_layers.append(pool_layer)
-
-            l_conv = lasagne.layers.ConcatLayer(conv_layers)
-            l_conv = lasagne.layers.DenseLayer(l_conv, num_units=hidden_size, nonlinearity=lasagne.nonlinearities.tanh)
 
         if is_bidirectional:
             if encoder.find('lstm') > -1:
@@ -165,82 +137,13 @@ class Model(object):
                                                  )
                     prev_fwd = l_recurrent
 
-        recurrent_size = hidden_size * 2 if is_bidirectional else hidden_size
-        if conv_attn:
-            l_rconv_in = lasagne.layers.InputLayer(shape=(batch_size, img_h, recurrent_size))
-            l_rconv_in = lasagne.layers.ReshapeLayer(l_rconv_in, shape=(batch_size, 1, img_h, recurrent_size))
-            conv_layers = []
-            for filter_size in filter_sizes:
-                conv_layer = lasagne.layers.Conv2DLayer(
-                        l_rconv_in,
-                        num_filters=num_filters,
-                        filter_size=(filter_size, recurrent_size),
-                        stride=(1,1),
-                        nonlinearity=lasagne.nonlinearities.rectify,
-                        border_mode='valid'
-                        )
-                pool_layer = lasagne.layers.MaxPool2DLayer(
-                        conv_layer,
-                        pool_size=(img_h-filter_size+1, 1)
-                        )
-                conv_layers.append(pool_layer)
+        l_out = l_recurrent
 
-            l_hidden1 = lasagne.layers.ConcatLayer(conv_layers)
-            l_hidden2 = lasagne.layers.DenseLayer(l_hidden1, num_units=hidden_size, nonlinearity=lasagne.nonlinearities.tanh)
-            l_out = l_hidden2
-        else:
-            l_out = l_recurrent
-
-        if conv_attn:
-            e_context = l_recurrent.get_output(c_input, mask=c_mask, deterministic=False)
-            e_response = l_recurrent.get_output(r_input, mask=r_mask, deterministic=False)
-            def step_fn(row_t, mask_t):
-                return row_t * mask_t.reshape((-1, 1))
-            if is_bidirectional:
-                e_context, _ = theano.scan(step_fn, outputs_info=None, sequences=[e_context, T.concatenate([c_mask, c_mask], axis=1)])
-                e_response, _ = theano.scan(step_fn, outputs_info=None, sequences=[e_response, T.concatenate([r_mask, r_mask], axis=1)])
-            else:
-                e_context, _ = theano.scan(step_fn, outputs_info=None, sequences=[e_context, c_mask])
-                e_response, _ = theano.scan(step_fn, outputs_info=None, sequences=[e_response, r_mask])
-
-            e_context = l_out.get_output(e_context, mask=c_mask, deterministic=False)
-            e_response = l_out.get_output(e_response, mask=r_mask, deterministic=False)
-        else:
-            e_context = l_out.get_output(c_input, mask=c_mask, deterministic=False)[T.arange(batch_size), c_seqlen].reshape((c.shape[0], hidden_size))
-            e_response = l_out.get_output(r_input, mask=r_mask, deterministic=False)[T.arange(batch_size), r_seqlen].reshape((r.shape[0], hidden_size))
-
-        if encoder.find('cnn') > -1:
-            e_conv_context = l_conv.get_output(c_input, deterministic=False)
-            e_conv_response = l_conv.get_output(r_input, deterministic=False)
-            if encoder.find('rnn') > -1 or encoder.find('lstm') > -1:
-                if elemwise_sum:
-                    e_context = e_context + e_conv_context
-                    e_response = e_response + e_conv_response
-                else:
-                    e_context = T.concatenate([e_context, e_conv_context], axis=1)
-                    e_response = T.concatenate([e_response, e_conv_response], axis=1)
-
-                # penalize correlation
-                if abs(corr_penalty) > 0:
-                    cor = []
-                    for i in range(hidden_size if elemwise_sum else 2*hidden_size):
-                        y1, y2 = e_context, e_response
-                        x1 = y1[:,i] - (np.ones(batch_size)*(T.sum(y1[:,i])/batch_size))
-                        x2 = y2[:,i] - (np.ones(batch_size)*(T.sum(y2[:,i])/batch_size))
-                        nr = T.sum(x1 * x2) / (T.sqrt(T.sum(x1 * x1))*T.sqrt(T.sum(x2 * x2)))
-                        cor.append(-nr)
-                if abs(xcov_penalty) > 0:
-                    e_context_mean = T.mean(e_context, axis=0, keepdims=True)
-                    e_response_mean = T.mean(e_response, axis=0, keepdims=True)
-                    e_context_centered = e_context - e_context_mean # (n, i)
-                    e_response_centered = e_response - e_response_mean # (n, j)
-                    
-                    outer_prod = (e_context_centered.dimshuffle(0, 1, 'x') *
-                                  e_response_centered.dimshuffle(0, 'x', 1)) # (n, i, j)
-                    xcov = T.sum(T.sqr(T.mean(outer_prod, axis=0)))
-            else:
-                e_context = e_conv_context
-                e_response = e_conv_response
+        input_stacked = T.concatenate([c_input, r_input], axis=0)
+        mask_stacked = T.concatenate([c_mask, r_mask], axis=0)
+        e_context_response = lasagne.layers.helper.get_output(l_out, input_stacked, mask=mask_stacked, deterministic=False)
+        e_context = e_context_response[:batch_size][T.arange(batch_size), c_seqlen].reshape((batch_size, hidden_size))
+        e_response = e_context_response[batch_size:][T.arange(batch_size), r_seqlen].reshape((batch_size, hidden_size))
 
         dp = T.batched_dot(e_context, T.dot(e_response, self.M.T))
         #dp = pp('dp')(dp)
@@ -259,14 +162,10 @@ class Model(object):
         self.pred = T.argmax(self.probas, axis=1)
         self.errors = T.sum(T.neq(self.pred, y))
         self.cost = T.nnet.binary_crossentropy(o, y).mean()
-        if encoder.find('cnn') > -1 and (encoder.find('rnn') > -1 or encoder.find('lstm') > -1):
-            if abs(corr_penalty) > 0:
-                self.cost += corr_penalty * T.sum(cor)
-            if abs(xcov_penalty) > 0:
-                self.cost += xcov_penalty * xcov
         self.l_out = l_out
         self.l_recurrent = l_recurrent
         self.embeddings = embeddings
+        self.embeddings_shared = embeddings_shared
         self.c = c
         self.r = r
         self.y = y
@@ -279,10 +178,8 @@ class Model(object):
 
     def update_params(self):
         params = lasagne.layers.get_all_params(self.l_out)
-        if self.conv_attn:
-            params += lasagne.layers.get_all_params(self.l_recurrent)
         if self.fine_tune_W:
-            params += [self.embeddings]
+            params += [self.embeddings_shared]
         if self.fine_tune_M:
             params += [self.M]
 
@@ -303,7 +200,8 @@ class Model(object):
             self.c_seqlen: self.shared_data['c_seqlen'],
             self.r_seqlen: self.shared_data['r_seqlen'],
             self.c_mask: self.shared_data['c_mask'],
-            self.r_mask: self.shared_data['r_mask']
+            self.r_mask: self.shared_data['r_mask'],
+            self.embeddings: self.embeddings_shared
         }
         self.train_model = theano.function([], self.cost, updates=updates, givens=givens, on_unused_input='warn')
         self.get_loss = theano.function([], self.errors, givens=givens, on_unused_input='warn')
@@ -452,7 +350,6 @@ def str2bool(v):
 def main():
   parser = argparse.ArgumentParser()
   parser.register('type','bool',str2bool)
-  parser.add_argument('--conv_attn', type='bool', default=False, help='Use convolutional attention')
   parser.add_argument('--encoder', type=str, default='rnn', help='Encoder')
   parser.add_argument('--hidden_size', type=int, default=200, help='Hidden size')
   parser.add_argument('--fine_tune_W', type='bool', default=False, help='Whether to fine-tune W')
@@ -469,8 +366,6 @@ def main():
   parser.add_argument('--use_pv', type='bool', default=False, help='Use PV')
   parser.add_argument('--pv_ndims', type=int, default=100, help='PV ndims')
   parser.add_argument('--max_seqlen', type=int, default=160, help='Max seqlen')
-  parser.add_argument('--corr_penalty', type=float, default=0.0, help='Correlation penalty')
-  parser.add_argument('--xcov_penalty', type=float, default=0.0, help='XCov penalty')
   parser.add_argument('--n_recurrent_layers', type=int, default=1, help='Num recurrent layers')
   parser.add_argument('--n_memory_slots', type=int, default=0, help='Num memory slots')
   parser.add_argument('--input_dir', type=str, default='.', help='Input dir')
@@ -513,11 +408,8 @@ def main():
                 optimizer=args.optimizer,
                 encoder=args.encoder,
                 is_bidirectional=args.is_bidirectional,
-                corr_penalty=args.corr_penalty,
-                xcov_penalty=args.xcov_penalty,
                 n_recurrent_layers=args.n_recurrent_layers,
-                n_memory_slots=args.n_memory_slots,
-                conv_attn=args.conv_attn)
+                n_memory_slots=args.n_memory_slots)
 
   print model.train(n_epochs=args.n_epochs, shuffle_batch=args.shuffle_batch)
   if args.save_model:
