@@ -18,59 +18,6 @@ from lasagne.layers import Layer, InputLayer, DenseLayer, helper
 sys.setrecursionlimit(10000)
 np.random.seed(42)
 
-class GradClip(theano.compile.ViewOp):
-    def __init__(self, clip_lower_bound, clip_upper_bound):
-        self.clip_lower_bound = clip_lower_bound
-        self.clip_upper_bound = clip_upper_bound
-        assert(self.clip_upper_bound >= self.clip_lower_bound)
-
-    def grad(self, args, g_outs):
-        def pgrad(g_out):
-            g_out = T.clip(g_out, self.clip_lower_bound, self.clip_upper_bound)
-            g_out = ifelse(T.any(T.isnan(g_out)), T.ones_like(g_out)*0.00001, g_out)
-            return g_out
-        return [pgrad(g_out) for g_out in g_outs]
-
-gradient_clipper = GradClip(-10.0, 10.0)
-#T.opt.register_canonicalize(theano.gof.OpRemove(gradient_clipper), name='gradient_clipper')
-
-def adam(loss, all_params, learning_rate=0.001, b1=0.9, b2=0.999, e=1e-8,
-         gamma=1-1e-8):
-    """
-    ADAM update rules
-    Default values are taken from [Kingma2014]
-
-    References:
-    [Kingma2014] Kingma, Diederik, and Jimmy Ba.
-    "Adam: A Method for Stochastic Optimization."
-    arXiv preprint arXiv:1412.6980 (2014).
-    http://arxiv.org/pdf/1412.6980v4.pdf
-
-    """
-    updates = []
-    all_grads = theano.grad(gradient_clipper(loss), all_params)
-    alpha = learning_rate
-    t = theano.shared(np.float32(1))
-    b1_t = b1*gamma**(t-1)   #(Decay the first moment running average coefficient)
-
-    for theta_previous, g in zip(all_params, all_grads):
-        m_previous = theano.shared(np.zeros(theta_previous.get_value().shape,
-                                            dtype=theano.config.floatX))
-        v_previous = theano.shared(np.zeros(theta_previous.get_value().shape,
-                                            dtype=theano.config.floatX))
-
-        m = b1_t*m_previous + (1 - b1_t)*g                             # (Update biased first moment estimate)
-        v = b2*v_previous + (1 - b2)*g**2                              # (Update biased second raw moment estimate)
-        m_hat = m / (1-b1**t)                                          # (Compute bias-corrected first moment estimate)
-        v_hat = v / (1-b2**t)                                          # (Compute bias-corrected second raw moment estimate)
-        theta = theta_previous - (alpha * m_hat) / (T.sqrt(v_hat) + e) #(Update parameters)
-
-        updates.append((m_previous, m))
-        updates.append((v_previous, v))
-        updates.append((theta_previous, theta) )
-    updates.append((t, t + 1.))
-    return updates
-
 class Model(object):
     def __init__(self,
                  data,
@@ -334,10 +281,9 @@ class Model(object):
         print "total_params: ", total_params
 
         if 'adam' == self.optimizer:
-            updates = adam(self.cost, params, learning_rate=self.lr)
+            updates = lasagne.updates.adam(self.cost, params, learning_rate=self.lr)
         elif 'adadelta' == self.optimizer:
-            updates = sgd_updates_adadelta(self.cost, params, self.lr_decay, 1e-6, self.sqr_norm_lim)
-#            updates = lasagne.updates.adadelta(self.cost, params, learning_rate=1.0, rho=self.lr_decay)
+            updates = lasagne.updates.adadelta(self.cost, params, learning_rate=1.0, rho=self.lr_decay)
         else:
             raise 'Unsupported optimizer: %s' % self.optimizer
 
@@ -464,42 +410,6 @@ class Model(object):
             if 0 in indices:
                 n_correct += 1
         return n_correct / (len(probas) / test_size)
-
-def as_floatX(variable):
-    if isinstance(variable, float):
-        return np.cast[theano.config.floatX](variable)
-
-    if isinstance(variable, np.ndarray):
-        return np.cast[theano.config.floatX](variable)
-    return theano.tensor.cast(variable, theano.config.floatX)
-
-def sgd_updates_adadelta(cost, params, rho=0.95, epsilon=1e-6, norm_lim=9, word_vec_name='embeddings'):
-    updates = OrderedDict({})
-    exp_sqr_grads = OrderedDict({})
-    exp_sqr_ups = OrderedDict({})
-    gparams = []
-    for param in params:
-        empty = np.zeros_like(param.get_value())
-        exp_sqr_grads[param] = theano.shared(value=as_floatX(empty),name="exp_grad_%s" % param.name)
-        gp = T.grad(cost, param)
-        exp_sqr_ups[param] = theano.shared(value=as_floatX(empty), name="exp_grad_%s" % param.name)
-        gparams.append(gp)
-    for param, gp in zip(params, gparams):
-        exp_sg = exp_sqr_grads[param]
-        exp_su = exp_sqr_ups[param]
-        up_exp_sg = rho * exp_sg + (1 - rho) * T.sqr(gp)
-        updates[exp_sg] = up_exp_sg
-        step =  -(T.sqrt(exp_su + epsilon) / T.sqrt(up_exp_sg + epsilon)) * gp
-        updates[exp_su] = rho * exp_su + (1 - rho) * T.sqr(step)
-        stepped_param = param + step
-        if (param.get_value(borrow=True).ndim == 2) and (param.name != word_vec_name):
-            col_norms = T.sqrt(T.sum(T.sqr(stepped_param), axis=0))
-            desired_norms = T.clip(col_norms, 0, T.sqrt(norm_lim))
-            scale = desired_norms / (1e-7 + col_norms)
-            updates[param] = stepped_param * scale
-        else:
-            updates[param] = stepped_param
-    return updates
 
 def pad_to_batch_size(X, batch_size):
     n_seqs = len(X)
