@@ -39,7 +39,6 @@ class Model(object):
                  elemwise_sum=True,
                  n_recurrent_layers=1,
                  n_memory_slots=0,
-                 dump_probas=False,
                  is_bidirectional=False):
         self.data = data
         self.img_h = img_h
@@ -281,8 +280,6 @@ class Model(object):
                 print 'test_perf: %f' % (test_perf*100)
                 test_probas = np.concatenate([self.compute_probas(self.data['test'], i) for i in xrange(n_test_batches)])
                 self.compute_recall_ks(test_probas)
-                if self.dump_probas:
-                    cPickle.dump(test_probas, open('test_probas.pkl', 'wb'))
             else:
                 if not self.fine_tune_W:
                     self.fine_tune_W = True # try fine-tuning W
@@ -370,6 +367,7 @@ def main():
   parser.add_argument('--n_memory_slots', type=int, default=0, help='Num memory slots')
   parser.add_argument('--input_dir', type=str, default='.', help='Input dir')
   parser.add_argument('--save_model', type='bool', default=False, help='Whether to save the model')
+  parser.add_argument('--load_model', type=str, default=False, help='Whether to load the model')
   parser.add_argument('--model_fname', type=str, default='model.pkl', help='Model filename')
   parser.add_argument('--dump_probas', type='bool', default=False, help='Dump test probabilities')
   args = parser.parse_args()
@@ -395,27 +393,35 @@ def main():
 
   data = { 'train' : train_data, 'val': val_data, 'test': test_data }
 
-  model = Model(data,
-                W.astype(theano.config.floatX),
-                img_h=args.max_seqlen,
-                img_w=W.shape[1],
-                hidden_size=args.hidden_size,
-                batch_size=args.batch_size,
-                lr=args.lr,
-                lr_decay=args.lr_decay,
-                sqr_norm_lim=args.sqr_norm_lim,
-                fine_tune_W=args.fine_tune_W,
-                fine_tune_M=args.fine_tune_M,
-                optimizer=args.optimizer,
-                encoder=args.encoder,
-                is_bidirectional=args.is_bidirectional,
-                n_recurrent_layers=args.n_recurrent_layers,
-                n_memory_slots=args.n_memory_slots,
-                dump_probas=args.dump_probas)
+  if args.load_model:
+    model = cPickle.load(open(args.model_fname))
+  else:
+    model = Model(data,
+                  W.astype(theano.config.floatX),
+                  img_h=args.max_seqlen,
+                  img_w=W.shape[1],
+                  hidden_size=args.hidden_size,
+                  batch_size=args.batch_size,
+                  lr=args.lr,
+                  lr_decay=args.lr_decay,
+                  sqr_norm_lim=args.sqr_norm_lim,
+                  fine_tune_W=args.fine_tune_W,
+                  fine_tune_M=args.fine_tune_M,
+                  optimizer=args.optimizer,
+                  encoder=args.encoder,
+                  is_bidirectional=args.is_bidirectional,
+                  n_recurrent_layers=args.n_recurrent_layers,
+                  n_memory_slots=args.n_memory_slots)
 
-  print model.train(n_epochs=args.n_epochs, shuffle_batch=args.shuffle_batch)
+    print model.train(n_epochs=args.n_epochs, shuffle_batch=args.shuffle_batch)
+
   if args.save_model:
-      cPickle.dump(model, open(args.model_fname, 'wb'))
+    cPickle.dump(model, open(args.model_fname, 'wb'))
+  
+  if args.dump_probas:
+    n_test_batches = len(model.data['test']['y']) // model.batch_size
+    test_probas = np.concatenate([model.compute_probas(model.data['test'], i) for i in xrange(n_test_batches)])
+    cPickle.dump(test_probas, open('test_probas.pkl', 'wb'))
 
 if __name__ == '__main__':
   main()
