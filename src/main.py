@@ -373,29 +373,29 @@ def main():
   args = parser.parse_args()
   print "args: ", args
 
-  print "loading data...",
-  if args.use_pv:
-      data = cPickle.load(open('../data/all_pv.pkl'))
-      train_data = { 'c': data['c'][:1000000], 'r': data['r'][:1000000], 'y': data['y'][:1000000] }
-      val_data = { 'c': data['c'][1000000:1356080], 'r': data['r'][1000000:1356080], 'y': data['y'][1000000:1356080] }
-      test_data = { 'c': data['c'][1000000+356080:], 'r': data['r'][1000000+356080:], 'y': data['y'][1000000+356080:] }
-
-      for key in ['c', 'r', 'y']:
-          for dataset in [train_data, val_data]:
-              dataset[key] = pad_to_batch_size(dataset[key], args.batch_size)
-
-      W = load_pv_vecs('../data/pv_vectors_%dd.txt' % args.pv_ndims, args.pv_ndims)
-      args.max_seqlen = 21
-  else:
-      train_data, val_data, test_data = cPickle.load(open('%s/dataset%s.pkl' % (args.input_dir, args.suffix), 'rb'))
-      W, _ = cPickle.load(open('%s/W%s.pkl' % (args.input_dir, args.suffix), 'rb'))
-  print "data loaded!"
-
-  data = { 'train' : train_data, 'val': val_data, 'test': test_data }
-
   if args.load_model:
     model = cPickle.load(open(args.model_fname))
   else:
+    print "loading data...",
+    if args.use_pv:
+        data = cPickle.load(open('../data/all_pv.pkl'))
+        train_data = { 'c': data['c'][:1000000], 'r': data['r'][:1000000], 'y': data['y'][:1000000] }
+        val_data = { 'c': data['c'][1000000:1356080], 'r': data['r'][1000000:1356080], 'y': data['y'][1000000:1356080] }
+        test_data = { 'c': data['c'][1000000+356080:], 'r': data['r'][1000000+356080:], 'y': data['y'][1000000+356080:] }
+
+        for key in ['c', 'r', 'y']:
+            for dataset in [train_data, val_data]:
+                dataset[key] = pad_to_batch_size(dataset[key], args.batch_size)
+
+        W = load_pv_vecs('../data/pv_vectors_%dd.txt' % args.pv_ndims, args.pv_ndims)
+        args.max_seqlen = 21
+    else:
+        train_data, val_data, test_data = cPickle.load(open('%s/dataset%s.pkl' % (args.input_dir, args.suffix), 'rb'))
+        W, _ = cPickle.load(open('%s/W%s.pkl' % (args.input_dir, args.suffix), 'rb'))
+    print "data loaded!"
+
+    data = { 'train' : train_data, 'val': val_data, 'test': test_data }
+
     model = Model(data,
                   W.astype(theano.config.floatX),
                   img_h=args.max_seqlen,
