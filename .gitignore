@@ -5,3 +5,4 @@ embeddings
 *.pkl
 *.pyc
 .ipynb_checkpoints/
+*.html
