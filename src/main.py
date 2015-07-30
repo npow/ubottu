@@ -38,6 +38,7 @@ class Model(object):
                  encoder='rnn',
                  elemwise_sum=True,
                  n_recurrent_layers=1,
+                 memory_size=200,
                  n_memory_slots=0,
                  is_bidirectional=False):
         self.data = data
@@ -49,7 +50,7 @@ class Model(object):
         self.lr_decay = lr_decay
         self.optimizer = optimizer
         self.sqr_norm_lim = sqr_norm_lim
-        self.external_memory_size = (hidden_size, n_memory_slots) if n_memory_slots > 0 else None
+        self.external_memory_size = (memory_size, n_memory_slots) if n_memory_slots > 0 else None
 
         c = T.imatrix('c')
         r = T.imatrix('r')
@@ -349,6 +350,7 @@ def main():
   parser.register('type','bool',str2bool)
   parser.add_argument('--encoder', type=str, default='rnn', help='Encoder')
   parser.add_argument('--hidden_size', type=int, default=200, help='Hidden size')
+  parser.add_argument('--memory_size', type=int, default=200, help='Memory size')
   parser.add_argument('--fine_tune_W', type='bool', default=False, help='Whether to fine-tune W')
   parser.add_argument('--fine_tune_M', type='bool', default=False, help='Whether to fine-tune M')
   parser.add_argument('--batch_size', type=int, default=256, help='Batch size')
@@ -411,6 +413,7 @@ def main():
                   encoder=args.encoder,
                   is_bidirectional=args.is_bidirectional,
                   n_recurrent_layers=args.n_recurrent_layers,
+                  memory_size=args.memory_size,
                   n_memory_slots=args.n_memory_slots)
 
     print model.train(n_epochs=args.n_epochs, shuffle_batch=args.shuffle_batch)
