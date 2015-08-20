@@ -6,7 +6,7 @@ The Ubuntu Dialogue Corpus: A Large Dataset for Research in Unstructured Multi-T
 #### Dependencies
 * Python 2.7
 * Theano bleeding-edge
-* Lasagne (specifically, [this fork](https://github.com/npow/nntools)). This will be cleaned up when [recurrent layers](https://github.com/Lasagne/Lasagne/issues/17) are merged into Lasagne.
+* Lasagne (specifically, [this fork](https://github.com/npow/nntools) with commit `a3890b2a743e7341c337e73a133120fbebee4150`). This will be cleaned up when [recurrent layers](https://github.com/Lasagne/Lasagne/issues/17) are merged into Lasagne.
 * Pyprind
 
 #### Usage
