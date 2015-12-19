@@ -5,3 +5,5 @@ embeddings
 *.pkl
 *.pyc
 .ipynb_checkpoints/
+*.csv
+dataset_1000000_updated/
