@@ -7,3 +7,5 @@ embeddings
 .ipynb_checkpoints/
 *.csv
 dataset_1000000_updated/
+output_*
+*.txt

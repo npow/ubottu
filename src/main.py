@@ -85,6 +85,7 @@ class Model(object):
                  fine_tune_W=True,
                  fine_tune_M=False,
                  optimizer='adam',
+                 forget_gate_bias=2,
                  filter_sizes=[3,4,5],
                  num_filters=100,
                  conv_attn=False,
@@ -137,7 +138,7 @@ class Model(object):
                         filter_size=(filter_size, img_w),
                         stride=(1,1),
                         nonlinearity=lasagne.nonlinearities.rectify,
-                        border_mode='valid'
+                        pad='valid'
                         )
                 pool_layer = lasagne.layers.MaxPool2DLayer(
                         conv_layer,
@@ -154,12 +155,16 @@ class Model(object):
                 for _ in xrange(n_recurrent_layers):
                     l_fwd = lasagne.layers.LSTMLayer(prev_fwd,
                                                      hidden_size,
+                                                     grad_clipping=10,
+                                                     forgetgate=lasagne.layers.Gate(b=lasagne.init.Constant(forget_gate_bias)),
                                                      backwards=False,
                                                      learn_init=True,
                                                      peepholes=True)
 
                     l_bck = lasagne.layers.LSTMLayer(prev_bck,
                                                      hidden_size,
+                                                     grad_clipping=10,
+                                                     forgetgate=lasagne.layers.Gate(b=lasagne.init.Constant(forget_gate_bias)),
                                                      backwards=True,
                                                      learn_init=True,
                                                      peepholes=True)
@@ -193,6 +198,8 @@ class Model(object):
                 for _ in xrange(n_recurrent_layers):
                     l_recurrent = lasagne.layers.LSTMLayer(prev_fwd,
                                                            hidden_size,
+                                                           grad_clipping=10,
+                                                           forgetgate=lasagne.layers.Gate(b=lasagne.init.Constant(forget_gate_bias)),
                                                            backwards=False,
                                                            learn_init=True,
                                                            peepholes=True)
@@ -221,7 +228,7 @@ class Model(object):
                         filter_size=(filter_size, recurrent_size),
                         stride=(1,1),
                         nonlinearity=lasagne.nonlinearities.rectify,
-                        border_mode='valid'
+                        pad='valid'
                         )
                 pool_layer = lasagne.layers.MaxPool2DLayer(
                         conv_layer,
@@ -236,8 +243,8 @@ class Model(object):
             l_out = l_recurrent
 
         if conv_attn:
-            e_context = l_recurrent.get_output(c_input, mask=c_mask, deterministic=False)
-            e_response = l_recurrent.get_output(r_input, mask=r_mask, deterministic=False)
+            e_context = lasagne.layers.helper.get_output(l_recurrent, c_input, mask=c_mask, deterministic=False)
+            e_response = lasagne.layers.helper.get_output(l_recurrent, r_input, mask=r_mask, deterministic=False)
             def step_fn(row_t, mask_t):
                 return row_t * mask_t.reshape((-1, 1))
             if is_bidirectional:
@@ -247,15 +254,15 @@ class Model(object):
                 e_context, _ = theano.scan(step_fn, outputs_info=None, sequences=[e_context, c_mask])
                 e_response, _ = theano.scan(step_fn, outputs_info=None, sequences=[e_response, r_mask])
 
-            e_context = l_out.get_output(e_context, mask=c_mask, deterministic=False)
-            e_response = l_out.get_output(e_response, mask=r_mask, deterministic=False)
+            e_context = lasagne.layers.helper.get_output(l_out, e_context, mask=c_mask, deterministic=False)
+            e_response = lasagne.layers.helper.get_output(l_out, e_response, mask=r_mask, deterministic=False)
         else:
-            e_context = l_out.get_output(c_input, mask=c_mask, deterministic=False)[T.arange(batch_size), c_seqlen].reshape((c.shape[0], hidden_size))
-            e_response = l_out.get_output(r_input, mask=r_mask, deterministic=False)[T.arange(batch_size), r_seqlen].reshape((r.shape[0], hidden_size))
+            e_context = lasagne.layers.helper.get_output(l_out, c_input, mask=c_mask, deterministic=False)[T.arange(batch_size), c_seqlen].reshape((c.shape[0], hidden_size))
+            e_response = lasagne.layers.helper.get_output(l_out, r_input, mask=r_mask, deterministic=False)[T.arange(batch_size), r_seqlen].reshape((r.shape[0], hidden_size))
 
         if encoder.find('cnn') > -1:
-            e_conv_context = l_conv.get_output(c_input, deterministic=False)
-            e_conv_response = l_conv.get_output(r_input, deterministic=False)
+            e_conv_context = lasagne.layers.helper.get_output(l_conv, c_input, deterministic=False)
+            e_conv_response = lasagne.layers.helper.get_output(l_conv, r_input, deterministic=False)
             if encoder.find('rnn') > -1 or encoder.find('lstm') > -1:
                 if elemwise_sum:
                     e_context = e_context + e_conv_context
@@ -546,7 +553,7 @@ def main():
   parser.add_argument('--sqr_norm_lim', type=float, default=1, help='Squared norm limit')
   parser.add_argument('--lr', type=float, default=0.001, help='Learning rate')
   parser.add_argument('--optimizer', type=str, default='adam', help='Optimizer')
-  parser.add_argument('--suffix', type=str, default='', help='Suffix for pkl files')
+  parser.add_argument('--forget_gate_bias', type=float, default=2.0, help='Forget gate bias')
   parser.add_argument('--use_pv', type='bool', default=False, help='Use PV')
   parser.add_argument('--pv_ndims', type=int, default=100, help='PV ndims')
   parser.add_argument('--max_seqlen', type=int, default=160, help='Max seqlen')
@@ -556,6 +563,8 @@ def main():
   parser.add_argument('--input_dir', type=str, default='.', help='Input dir')
   parser.add_argument('--save_model', type='bool', default=False, help='Whether to save the model')
   parser.add_argument('--model_fname', type=str, default='model.pkl', help='Model filename')
+  parser.add_argument('--dataset_fname', type=str, default='dataset.pkl', help='Dataset filename')
+  parser.add_argument('--W_fname', type=str, default='W.pkl', help='W filename')
   args = parser.parse_args()
   print "args: ", args
 
@@ -573,8 +582,8 @@ def main():
       W = load_pv_vecs('../data/pv_vectors_%dd.txt' % args.pv_ndims, args.pv_ndims)
       args.max_seqlen = 21
   else:
-      train_data, val_data, test_data = cPickle.load(open('%s/dataset%s.pkl' % (args.input_dir, args.suffix), 'rb'))
-      W, _ = cPickle.load(open('%s/W%s.pkl' % (args.input_dir, args.suffix), 'rb'))
+      train_data, val_data, test_data = cPickle.load(open('%s/%s' % (args.input_dir, args.dataset_fname), 'rb'))
+      W, _ = cPickle.load(open('%s/%s' % (args.input_dir, args.W_fname), 'rb'))
   print "data loaded!"
 
   data = { 'train' : train_data, 'val': val_data, 'test': test_data }
@@ -591,6 +600,7 @@ def main():
                 fine_tune_W=args.fine_tune_W,
                 fine_tune_M=args.fine_tune_M,
                 optimizer=args.optimizer,
+                forget_gate_bias=args.forget_gate_bias,
                 encoder=args.encoder,
                 is_bidirectional=args.is_bidirectional,
                 corr_penalty=args.corr_penalty,
