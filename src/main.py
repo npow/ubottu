@@ -204,6 +204,15 @@ class Model(object):
                                                            learn_init=True,
                                                            peepholes=True)
                     prev_fwd = l_recurrent
+            elif encoder.find('gru') > -1:
+                for _ in xrange(n_recurrent_layers):
+                    l_recurrent = lasagne.layers.GRULayer(prev_fwd,
+                                                          hidden_size,
+                                                          grad_clipping=10,
+                                                          resetgate=lasagne.layers.Gate(b=lasagne.init.Constant(forget_gate_bias)),
+                                                          backwards=False,
+                                                          learn_init=True)
+                    prev_fwd = l_recurrent
             else:
                 for _ in xrange(n_recurrent_layers):
                     l_recurrent = lasagne.layers.RecurrentLayer(prev_fwd,
@@ -534,6 +543,13 @@ def load_pv_vecs(fname, ndims):
             X[i+1] = np.array(L[1:], dtype='float32')
         return X
 
+def sort_by_len(dataset):
+    c, r, y = dataset['c'], dataset['r'], dataset['y']
+    indices = range(len(y))
+    indices.sort(key=lambda i: len(c[i]))
+    for k in ['c', 'r', 'y']:
+        dataset[k] = np.array(dataset[k])[indices]
+
 def str2bool(v):
   return v.lower() in ("yes", "true", "t", "1")
 
@@ -587,6 +603,7 @@ def main():
   print "data loaded!"
 
   data = { 'train' : train_data, 'val': val_data, 'test': test_data }
+  sort_by_len(data['train'])
 
   model = Model(data,
                 W.astype(theano.config.floatX),
