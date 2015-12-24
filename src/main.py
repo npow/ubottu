@@ -581,6 +581,7 @@ def main():
   parser.add_argument('--model_fname', type=str, default='model.pkl', help='Model filename')
   parser.add_argument('--dataset_fname', type=str, default='dataset.pkl', help='Dataset filename')
   parser.add_argument('--W_fname', type=str, default='W.pkl', help='W filename')
+  parser.add_argument('--sort_by_len', type='bool', default=False, help='Whether to sort contexts by length')
   args = parser.parse_args()
   print "args: ", args
 
@@ -603,7 +604,8 @@ def main():
   print "data loaded!"
 
   data = { 'train' : train_data, 'val': val_data, 'test': test_data }
-  sort_by_len(data['train'])
+  if args.sort_by_len:
+      sort_by_len(data['train'])
 
   model = Model(data,
                 W.astype(theano.config.floatX),
