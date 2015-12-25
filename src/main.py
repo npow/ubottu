@@ -329,10 +329,10 @@ class Model(object):
         self.cost = T.nnet.binary_crossentropy(o, y).mean()
 
         if self.penalize_emb_norm:
-            self.cost += self.emb_penalty * (self.embeddings ** 2).sum()
+            self.cost += self.emb_penalty * (embeddings ** 2).sum()
 
         if self.penalize_emb_drift:
-            self.cost += self.emb_penalty * ((self.embeddings - self.orig_embeddings) ** 2).sum()
+            self.cost += self.emb_penalty * ((embeddings - self.orig_embeddings) ** 2).sum()
 
         if encoder.find('cnn') > -1 and (encoder.find('rnn') > -1 or encoder.find('lstm') > -1):
             if abs(corr_penalty) > 0:
