@@ -97,6 +97,7 @@ class Model:
                  penalize_activations=False,
                  emb_penalty=0.001,
                  act_penalty=500,
+                 k=4,
                  n_recurrent_layers=1,
                  is_bidirectional=False,
                  **kwargs):
@@ -133,10 +134,11 @@ class Model:
         if encoder.find('cnn') > -1 and (encoder.find('rnn') > -1 or encoder.find('lstm') > -1) and not elemwise_sum:
             self.M = theano.shared(np.eye(2*hidden_size).astype(theano.config.floatX), borrow=True)
         elif use_ntn:
-            self.U = theano.shared(np.random.rand((k)).astype(theano.config.floatX), borrow=True)
-            self.V = theano.shared(np.random.rand(k, 2*hidden_size).astype(theano.config.floatX), borrow=True)
-            self.b = theano.shared(np.random.rand((k)).astype(theano.config.floatX), borrow=True)
-            self.M = theano.shared(np.random.rand((hidden_size, hidden_size, k))).astype(theano.config.floatX), borrow=True)
+            self.U = theano.shared(np.random.uniform(-0.01, 0.01, size=(k,)).astype(theano.config.floatX), borrow=True)
+            self.V = theano.shared(np.random.uniform(-0.01, 0.01, size=(k, 2*hidden_size)).astype(theano.config.floatX), borrow=True)
+            self.b = theano.shared(np.random.uniform(-0.01, 0.01, size=(k,)).astype(theano.config.floatX), borrow=True)
+            self.M = theano.shared(np.random.uniform(-0.01, 0.01, size=(k, hidden_size, hidden_size)).astype(theano.config.floatX), borrow=True)
+            self.f = lasagne.nonlinearities.tanh
         else:
             self.M = theano.shared(np.eye(hidden_size).astype(theano.config.floatX), borrow=True)
 
@@ -321,7 +323,12 @@ class Model:
                 e_context = e_conv_context
                 e_response = e_conv_response
 
-        dp = T.batched_dot(e_context, T.dot(e_response, self.M.T))
+        if use_ntn:
+            dp = T.concatenate([T.batched_dot(e_context, T.dot(e_response, self.M[i])) for i in xrange(k)], axis=1)
+            dp += T.concatenate([e_context, e_response], axis=1).dot(self.V.T) + self.b
+            dp = self.f(dp).dot(self.U)
+        else:
+            dp = T.batched_dot(e_context, T.dot(e_response, self.M.T))
         #dp = pp('dp')(dp)
         o = T.nnet.sigmoid(dp)
         o = T.clip(o, 1e-7, 1.0-1e-7)
@@ -369,11 +376,13 @@ class Model:
 
     def update_params(self):
         params = lasagne.layers.get_all_params(self.l_out)
+        if self.use_ntn:
+            params += [self.U, self.V, self.M, self.b]
         if self.conv_attn:
             params += lasagne.layers.get_all_params(self.l_recurrent)
         if self.fine_tune_W:
             params += [self.embeddings]
-        if self.fine_tune_M:
+        if self.fine_tune_M and not self.use_ntn:
             params += [self.M]
 
         total_params = sum([p.get_value().size for p in params])
@@ -618,6 +627,8 @@ def main():
   parser.add_argument('--penalize_activations', type='bool', default=False, help='Whether to penalize activations')
   parser.add_argument('--emb_penalty', type=float, default=0.001, help='Embedding penalty')
   parser.add_argument('--act_penalty', type=float, default=500, help='Activation penalty')
+  parser.add_argument('--use_ntn', type='bool', default=False, help='Whether to use NTN')
+  parser.add_argument('--k', type=int, default=4, help='Size of k in NTN')
   parser.add_argument('--seed', type=int, default=42, help='Random seed')
   args = parser.parse_args()
   print 'args:', args
@@ -649,6 +660,7 @@ def main():
 
   model = Model(**args.__dict__)
   _, test_probas = model.train(n_epochs=args.n_epochs, shuffle_batch=args.shuffle_batch)
+
   if args.save_model:
       cPickle.dump(model, open(args.model_fname, 'wb'))
       cPickle.dump(test_probas, open('probas_%s' % args.model_fname, 'wb'))
