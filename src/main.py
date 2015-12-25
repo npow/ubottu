@@ -73,7 +73,7 @@ def adam(loss, all_params, learning_rate=0.001, b1=0.9, b2=0.999, e=1e-8,
 class Model:
     def __init__(self,
                  data,
-                 U,
+                 W,
                  max_seqlen=160,
                  hidden_size=100,
                  batch_size=50,
@@ -82,6 +82,7 @@ class Model:
                  sqr_norm_lim=9,
                  fine_tune_W=True,
                  fine_tune_M=False,
+                 use_ntn=False,
                  optimizer='adam',
                  forget_gate_bias=2,
                  filter_sizes=[3,4,5],
@@ -105,6 +106,7 @@ class Model:
         self.batch_size = batch_size
         self.fine_tune_W = fine_tune_W
         self.fine_tune_M = fine_tune_M
+        self.use_ntn = use_ntn
         self.lr = lr
         self.lr_decay = lr_decay
         self.optimizer = optimizer
@@ -124,12 +126,17 @@ class Model:
         r_mask = T.fmatrix('r_mask')
         c_seqlen = T.ivector('c_seqlen')
         r_seqlen = T.ivector('r_seqlen')
-        embeddings = theano.shared(U, name='embeddings', borrow=True)
+        embeddings = theano.shared(W, name='embeddings', borrow=True)
         zero_vec_tensor = T.fvector()
         self.zero_vec = np.zeros(embedding_size, dtype=theano.config.floatX)
         self.set_zero = theano.function([zero_vec_tensor], updates=[(embeddings, T.set_subtensor(embeddings[0,:], zero_vec_tensor))])
         if encoder.find('cnn') > -1 and (encoder.find('rnn') > -1 or encoder.find('lstm') > -1) and not elemwise_sum:
             self.M = theano.shared(np.eye(2*hidden_size).astype(theano.config.floatX), borrow=True)
+        elif use_ntn:
+            self.U = theano.shared(np.random.rand((k)).astype(theano.config.floatX), borrow=True)
+            self.V = theano.shared(np.random.rand(k, 2*hidden_size).astype(theano.config.floatX), borrow=True)
+            self.b = theano.shared(np.random.rand((k)).astype(theano.config.floatX), borrow=True)
+            self.M = theano.shared(np.random.rand((hidden_size, hidden_size, k))).astype(theano.config.floatX), borrow=True)
         else:
             self.M = theano.shared(np.eye(hidden_size).astype(theano.config.floatX), borrow=True)
 
