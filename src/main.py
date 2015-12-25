@@ -93,6 +93,9 @@ class Model(object):
                  elemwise_sum=True,
                  corr_penalty=0.0,
                  xcov_penalty=0.0,
+                 penalize_emb_norm=False,
+                 penalize_emb_drift=False,
+                 emb_penalty=10,
                  n_recurrent_layers=1,
                  is_bidirectional=False):
         self.data = data
@@ -105,6 +108,11 @@ class Model(object):
         self.optimizer = optimizer
         self.sqr_norm_lim = sqr_norm_lim
         self.conv_attn = conv_attn
+        self.emb_penalty = emb_penalty
+        self.penalize_emb_norm = penalize_emb_norm
+        self.penalize_emb_drift = penalize_emb_drift
+        if penalize_emb_drift:
+            self.orig_embeddings = theano.shared(U.copy(), name='orig_embeddings', borrow=True)
 
         index = T.iscalar()
         c = T.imatrix('c')
@@ -319,6 +327,13 @@ class Model(object):
         self.pred = T.argmax(self.probas, axis=1)
         self.errors = T.sum(T.neq(self.pred, y))
         self.cost = T.nnet.binary_crossentropy(o, y).mean()
+
+        if self.penalize_emb_norm:
+            self.cost += self.emb_penalty * (self.embeddings ** 2).sum()
+
+        if self.penalize_emb_drift:
+            self.cost += self.emb_penalty * ((self.embeddings - self.orig_embeddings) ** 2).sum()
+
         if encoder.find('cnn') > -1 and (encoder.find('rnn') > -1 or encoder.find('lstm') > -1):
             if abs(corr_penalty) > 0:
                 self.cost += corr_penalty * T.sum(cor)
@@ -582,6 +597,9 @@ def main():
   parser.add_argument('--dataset_fname', type=str, default='dataset.pkl', help='Dataset filename')
   parser.add_argument('--W_fname', type=str, default='W.pkl', help='W filename')
   parser.add_argument('--sort_by_len', type='bool', default=False, help='Whether to sort contexts by length')
+  parser.add_argument('--penalize_emb_norm', type='bool', default=False, help='Whether to penalize norm of embeddings')
+  parser.add_argument('--penalize_emb_drift', type='bool', default=False, help='Whether to use re-embedding words penalty')
+  parser.add_argument('--emb_penalty', type=float, default=100, help='Embedding penalty')
   args = parser.parse_args()
   print "args: ", args
 
@@ -624,6 +642,9 @@ def main():
                 is_bidirectional=args.is_bidirectional,
                 corr_penalty=args.corr_penalty,
                 xcov_penalty=args.xcov_penalty,
+                emb_penalty=args.emb_penalty,
+                penalize_emb_norm=args.penalize_emb_norm,
+                penalize_emb_drift=args.penalize_emb_drift,
                 n_recurrent_layers=args.n_recurrent_layers,
                 conv_attn=args.conv_attn)
 
