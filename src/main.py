@@ -71,7 +71,7 @@ def adam(loss, all_params, learning_rate=0.001, b1=0.9, b2=0.999, e=1e-8,
     updates.append((t, t + 1.))
     return updates
 
-class Model(object):
+class Model:
     def __init__(self,
                  data,
                  U,
@@ -630,7 +630,7 @@ def main():
   print "data loaded!"
 
   args.data = { 'train' : train_data, 'val': val_data, 'test': test_data }
-  args.W = W.astype(theano.config.floatX)
+  args.U = W.astype(theano.config.floatX)
 
   if args.sort_by_len:
       sort_by_len(data['train'])
