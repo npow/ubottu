@@ -97,7 +97,8 @@ class Model(object):
                  penalize_activations=False,
                  emb_penalty=10,
                  n_recurrent_layers=1,
-                 is_bidirectional=False):
+                 is_bidirectional=False,
+                 **kwargs):
         embedding_size = U.shape[1]
         self.data = data
         self.max_seqlen = max_seqlen
