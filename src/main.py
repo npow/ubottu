@@ -338,7 +338,7 @@ class Model:
         if self.penalize_emb_drift:
             self.cost += self.emb_penalty * ((embeddings - self.orig_embeddings) ** 2).sum()
 
-        if self.penalize_activations and not self.conv_attn:
+        if penalize_activations and not conv_attn:
             self.cost += [(h_context[:,i] - h_context[:,i+1]) ** 2 for i in xrange(max_seqlen-1)]
             self.cost += [(h_response[:,i] - h_response[:,i+1]) ** 2 for i in xrange(max_seqlen-1)]
 
