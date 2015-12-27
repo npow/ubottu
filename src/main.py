@@ -95,7 +95,8 @@ class Model:
                  penalize_emb_norm=False,
                  penalize_emb_drift=False,
                  penalize_activations=False,
-                 emb_penalty=10,
+                 emb_penalty=0.001,
+                 act_penalty=500,
                  n_recurrent_layers=1,
                  is_bidirectional=False,
                  **kwargs):
@@ -339,8 +340,8 @@ class Model:
             self.cost += self.emb_penalty * ((embeddings - self.orig_embeddings) ** 2).sum()
 
         if penalize_activations and not conv_attn:
-            self.cost += [(h_context[:,i] - h_context[:,i+1]) ** 2 for i in xrange(max_seqlen-1)]
-            self.cost += [(h_response[:,i] - h_response[:,i+1]) ** 2 for i in xrange(max_seqlen-1)]
+            self.cost += act_penalty * T.stack([((h_context[:,i] - h_context[:,i+1]) ** 2).sum(axis=1).mean() for i in xrange(max_seqlen-1)]).mean()
+            self.cost += act_penalty * T.stack([((h_response[:,i] - h_response[:,i+1]) ** 2).sum(axis=1).mean() for i in xrange(max_seqlen-1)]).mean()
 
         if encoder.find('cnn') > -1 and (encoder.find('rnn') > -1 or encoder.find('lstm') > -1):
             if abs(corr_penalty) > 0:
@@ -608,7 +609,8 @@ def main():
   parser.add_argument('--penalize_emb_norm', type='bool', default=False, help='Whether to penalize norm of embeddings')
   parser.add_argument('--penalize_emb_drift', type='bool', default=False, help='Whether to use re-embedding words penalty')
   parser.add_argument('--penalize_activations', type='bool', default=False, help='Whether to penalize activations')
-  parser.add_argument('--emb_penalty', type=float, default=100, help='Embedding penalty')
+  parser.add_argument('--emb_penalty', type=float, default=0.001, help='Embedding penalty')
+  parser.add_argument('--act_penalty', type=float, default=500, help='Activation penalty')
   args = parser.parse_args()
 
   print "loading data...",
