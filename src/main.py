@@ -95,6 +95,7 @@ class Model(object):
                  xcov_penalty=0.0,
                  penalize_emb_norm=False,
                  penalize_emb_drift=False,
+                 penalize_activations=False,
                  emb_penalty=10,
                  n_recurrent_layers=1,
                  is_bidirectional=False):
@@ -274,8 +275,10 @@ class Model(object):
             e_context = lasagne.layers.helper.get_output(l_out, e_context, mask=c_mask, deterministic=False)
             e_response = lasagne.layers.helper.get_output(l_out, e_response, mask=r_mask, deterministic=False)
         else:
-            e_context = lasagne.layers.helper.get_output(l_out, c_input, mask=c_mask, deterministic=False)[T.arange(batch_size), c_seqlen].reshape((c.shape[0], hidden_size))
-            e_response = lasagne.layers.helper.get_output(l_out, r_input, mask=r_mask, deterministic=False)[T.arange(batch_size), r_seqlen].reshape((r.shape[0], hidden_size))
+            h_context = lasagne.layers.helper.get_output(l_out, c_input, mask=c_mask, deterministic=False)
+            h_response = lasagne.layers.helper.get_output(l_out, r_input, mask=r_mask, deterministic=False)
+            e_context = h_context[T.arange(batch_size), c_seqlen].reshape((c.shape[0], hidden_size))
+            e_response = h_response[T.arange(batch_size), r_seqlen].reshape((r.shape[0], hidden_size))
 
         if encoder.find('cnn') > -1:
             e_conv_context = lasagne.layers.helper.get_output(l_conv, c_input, deterministic=False)
@@ -333,6 +336,10 @@ class Model(object):
 
         if self.penalize_emb_drift:
             self.cost += self.emb_penalty * ((embeddings - self.orig_embeddings) ** 2).sum()
+
+        if self.penalize_activations and not self.conv_attn:
+            self.cost += [(h_context[:,i] - h_context[:,i+1]) ** 2 for i in xrange(img_h-1)]
+            self.cost += [(h_response[:,i] - h_response[:,i+1]) ** 2 for i in xrange(img_h-1)]
 
         if encoder.find('cnn') > -1 and (encoder.find('rnn') > -1 or encoder.find('lstm') > -1):
             if abs(corr_penalty) > 0:
@@ -599,6 +606,7 @@ def main():
   parser.add_argument('--sort_by_len', type='bool', default=False, help='Whether to sort contexts by length')
   parser.add_argument('--penalize_emb_norm', type='bool', default=False, help='Whether to penalize norm of embeddings')
   parser.add_argument('--penalize_emb_drift', type='bool', default=False, help='Whether to use re-embedding words penalty')
+  parser.add_argument('--penalize_activations', type='bool', default=False, help='Whether to penalize activations')
   parser.add_argument('--emb_penalty', type=float, default=100, help='Embedding penalty')
   args = parser.parse_args()
   print "args: ", args
@@ -645,6 +653,7 @@ def main():
                 emb_penalty=args.emb_penalty,
                 penalize_emb_norm=args.penalize_emb_norm,
                 penalize_emb_drift=args.penalize_emb_drift,
+                penalize_activations=args.penalize_activations,
                 n_recurrent_layers=args.n_recurrent_layers,
                 conv_attn=args.conv_attn)
 
