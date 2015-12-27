@@ -75,8 +75,7 @@ class Model(object):
     def __init__(self,
                  data,
                  U,
-                 img_h=160,
-                 img_w=300,
+                 max_seqlen=160,
                  hidden_size=100,
                  batch_size=50,
                  lr=0.001,
@@ -99,8 +98,9 @@ class Model(object):
                  emb_penalty=10,
                  n_recurrent_layers=1,
                  is_bidirectional=False):
+        embedding_size = U.shape[1]
         self.data = data
-        self.img_h = img_h
+        self.max_seqlen = max_seqlen
         self.batch_size = batch_size
         self.fine_tune_W = fine_tune_W
         self.fine_tune_M = fine_tune_M
@@ -125,7 +125,7 @@ class Model(object):
         r_seqlen = T.ivector('r_seqlen')
         embeddings = theano.shared(U, name='embeddings', borrow=True)
         zero_vec_tensor = T.fvector()
-        self.zero_vec = np.zeros(img_w, dtype=theano.config.floatX)
+        self.zero_vec = np.zeros(embedding_size, dtype=theano.config.floatX)
         self.set_zero = theano.function([zero_vec_tensor], updates=[(embeddings, T.set_subtensor(embeddings[0,:], zero_vec_tensor))])
         if encoder.find('cnn') > -1 and (encoder.find('rnn') > -1 or encoder.find('lstm') > -1) and not elemwise_sum:
             self.M = theano.shared(np.eye(2*hidden_size).astype(theano.config.floatX), borrow=True)
@@ -135,23 +135,23 @@ class Model(object):
         c_input = embeddings[c.flatten()].reshape((c.shape[0], c.shape[1], embeddings.shape[1]))
         r_input = embeddings[r.flatten()].reshape((r.shape[0], r.shape[1], embeddings.shape[1]))
 
-        l_in = lasagne.layers.InputLayer(shape=(batch_size, img_h, img_w))
+        l_in = lasagne.layers.InputLayer(shape=(batch_size, max_seqlen, embedding_size))
 
         if encoder.find('cnn') > -1:
-            l_conv_in = lasagne.layers.ReshapeLayer(l_in, shape=(batch_size, 1, img_h, img_w))
+            l_conv_in = lasagne.layers.ReshapeLayer(l_in, shape=(batch_size, 1, max_seqlen, embedding_size))
             conv_layers = []
             for filter_size in filter_sizes:
                 conv_layer = lasagne.layers.Conv2DLayer(
                         l_conv_in,
                         num_filters=num_filters,
-                        filter_size=(filter_size, img_w),
+                        filter_size=(filter_size, embedding_size),
                         stride=(1,1),
                         nonlinearity=lasagne.nonlinearities.rectify,
                         pad='valid'
                         )
                 pool_layer = lasagne.layers.MaxPool2DLayer(
                         conv_layer,
-                        pool_size=(img_h-filter_size+1, 1)
+                        pool_size=(max_seqlen-filter_size+1, 1)
                         )
                 conv_layers.append(pool_layer)
 
@@ -236,8 +236,8 @@ class Model(object):
 
         recurrent_size = hidden_size * 2 if is_bidirectional else hidden_size
         if conv_attn:
-            l_rconv_in = lasagne.layers.InputLayer(shape=(batch_size, img_h, recurrent_size))
-            l_rconv_in = lasagne.layers.ReshapeLayer(l_rconv_in, shape=(batch_size, 1, img_h, recurrent_size))
+            l_rconv_in = lasagne.layers.InputLayer(shape=(batch_size, max_seqlen, recurrent_size))
+            l_rconv_in = lasagne.layers.ReshapeLayer(l_rconv_in, shape=(batch_size, 1, max_seqlen, recurrent_size))
             conv_layers = []
             for filter_size in filter_sizes:
                 conv_layer = lasagne.layers.Conv2DLayer(
@@ -250,7 +250,7 @@ class Model(object):
                         )
                 pool_layer = lasagne.layers.MaxPool2DLayer(
                         conv_layer,
-                        pool_size=(img_h-filter_size+1, 1)
+                        pool_size=(max_seqlen-filter_size+1, 1)
                         )
                 conv_layers.append(pool_layer)
 
@@ -320,9 +320,9 @@ class Model(object):
 
         self.shared_data = {}
         for key in ['c', 'r']:
-            self.shared_data[key] = theano.shared(np.zeros((batch_size, img_h), dtype=np.int32))
+            self.shared_data[key] = theano.shared(np.zeros((batch_size, max_seqlen), dtype=np.int32))
         for key in ['c_mask', 'r_mask']:
-            self.shared_data[key] = theano.shared(np.zeros((batch_size, img_h), dtype=theano.config.floatX))
+            self.shared_data[key] = theano.shared(np.zeros((batch_size, max_seqlen), dtype=theano.config.floatX))
         for key in ['y', 'c_seqlen', 'r_seqlen']:
             self.shared_data[key] = theano.shared(np.zeros((batch_size,), dtype=np.int32))
 
@@ -338,8 +338,8 @@ class Model(object):
             self.cost += self.emb_penalty * ((embeddings - self.orig_embeddings) ** 2).sum()
 
         if self.penalize_activations and not self.conv_attn:
-            self.cost += [(h_context[:,i] - h_context[:,i+1]) ** 2 for i in xrange(img_h-1)]
-            self.cost += [(h_response[:,i] - h_response[:,i+1]) ** 2 for i in xrange(img_h-1)]
+            self.cost += [(h_context[:,i] - h_context[:,i+1]) ** 2 for i in xrange(max_seqlen-1)]
+            self.cost += [(h_response[:,i] - h_response[:,i+1]) ** 2 for i in xrange(max_seqlen-1)]
 
         if encoder.find('cnn') > -1 and (encoder.find('rnn') > -1 or encoder.find('lstm') > -1):
             if abs(corr_penalty) > 0:
@@ -405,8 +405,8 @@ class Model(object):
         return batch, seqlen, mask
 
     def set_shared_variables(self, dataset, index):
-        c, c_seqlen, c_mask = self.get_batch(dataset['c'], index, self.img_h)
-        r, r_seqlen, r_mask = self.get_batch(dataset['r'], index, self.img_h)
+        c, c_seqlen, c_mask = self.get_batch(dataset['c'], index, self.max_seqlen)
+        r, r_seqlen, r_mask = self.get_batch(dataset['r'], index, self.max_seqlen)
         y = np.array(dataset['y'][index*self.batch_size:(index+1)*self.batch_size], dtype=np.int32)
         self.shared_data['c'].set_value(c)
         self.shared_data['r'].set_value(r)
@@ -609,7 +609,6 @@ def main():
   parser.add_argument('--penalize_activations', type='bool', default=False, help='Whether to penalize activations')
   parser.add_argument('--emb_penalty', type=float, default=100, help='Embedding penalty')
   args = parser.parse_args()
-  print "args: ", args
 
   print "loading data...",
   if args.use_pv:
@@ -629,34 +628,13 @@ def main():
       W, _ = cPickle.load(open('%s/%s' % (args.input_dir, args.W_fname), 'rb'))
   print "data loaded!"
 
-  data = { 'train' : train_data, 'val': val_data, 'test': test_data }
+  args.data = { 'train' : train_data, 'val': val_data, 'test': test_data }
+  args.W = W.astype(theano.config.floatX)
+
   if args.sort_by_len:
       sort_by_len(data['train'])
 
-  model = Model(data,
-                W.astype(theano.config.floatX),
-                img_h=args.max_seqlen,
-                img_w=W.shape[1],
-                hidden_size=args.hidden_size,
-                batch_size=args.batch_size,
-                lr=args.lr,
-                lr_decay=args.lr_decay,
-                sqr_norm_lim=args.sqr_norm_lim,
-                fine_tune_W=args.fine_tune_W,
-                fine_tune_M=args.fine_tune_M,
-                optimizer=args.optimizer,
-                forget_gate_bias=args.forget_gate_bias,
-                encoder=args.encoder,
-                is_bidirectional=args.is_bidirectional,
-                corr_penalty=args.corr_penalty,
-                xcov_penalty=args.xcov_penalty,
-                emb_penalty=args.emb_penalty,
-                penalize_emb_norm=args.penalize_emb_norm,
-                penalize_emb_drift=args.penalize_emb_drift,
-                penalize_activations=args.penalize_activations,
-                n_recurrent_layers=args.n_recurrent_layers,
-                conv_attn=args.conv_attn)
-
+  model = Model(**args.__dict__)
   print model.train(n_epochs=args.n_epochs, shuffle_batch=args.shuffle_batch)
   if args.save_model:
       cPickle.dump(model, open(args.model_fname, 'wb'))
