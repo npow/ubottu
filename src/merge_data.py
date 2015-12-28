@@ -146,7 +146,7 @@ def main():
     print "embeddings loaded!"
     print "num words with embeddings: ", len(embeddings)
 
-    add_unknown_words(embeddings, vocab, min_df=1)
+    add_unknown_words(embeddings, vocab, min_df=2)
     W, word_idx_map = get_W(embeddings, k=300)
     print "W: ", W.shape
 
@@ -170,7 +170,7 @@ def main():
     del W
 
     rand_vecs = {}
-    add_unknown_words(rand_vecs, vocab, min_df=1)
+    add_unknown_words(rand_vecs, vocab, min_df=2)
     W2, _ = get_W(rand_vecs, k=300)
     print "W2: ", W2.shape
     cPickle.dump([W2, word_idx_map], open("%s/W2%s.pkl" % (args.output_dir, args.suffix), "wb"), protocol=-1)
