@@ -58,7 +58,11 @@ if args.run_w2v:
     if args.process_stackexchange:
         for d in ['meta.askubuntu.com', 'askubuntu.com']:
             for fname, elem in [('Posts.xml', 'Body'), ('meta.askubuntu.com/Comments.xml', 'Text')]:
-                lines += get_stackexchange_lines('%s/%s/%s' % (args.stackexchange_dir, d, fname), elem)
+                fname = '%s/%s/%s' % (args.stackexchange_dir, d, fname)
+                se_lines = get_stackexchange_lines(fname, elem)
+                print fname, len(se_lines)
+                lines += se_lines
+
     print 'done loading lines: ', len(lines)
     model = gensim.models.Word2Vec(size=args.embedding_size, window=args.window_size, min_count=args.min_count, workers=args.num_workers)
     model.build_vocab(lines)
