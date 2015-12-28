@@ -4,6 +4,8 @@ import csv
 import gensim, logging
 import nltk
 import numpy as np
+import xml.etree.ElementTree
+from bs4 import BeautifulSoup
 
 def str2bool(v):
       return v.lower() in ("yes", "true", "t", "1")
@@ -18,8 +20,21 @@ parser.add_argument('--embedding_size', type=int, default=300, help='Embedding s
 parser.add_argument('--min_count', type=int, default=1, help='Min count')
 parser.add_argument('--num_workers', type=int, default=16, help='Num workers')
 parser.add_argument('--split_utterances', type='bool', default=True, help='Split utterances')
+parser.add_argument('--process_stackexchange', type='bool', default=True, help='Include stackexchange files')
+parser.add_argument('--stackexchange_dir', type=str, default='.', help='Directory containing stackexchange files')
 args = parser.parse_args()
 print 'args: ', args
+
+def get_stackexchange_lines(fname, elem):
+    lines = []
+    e = xml.etree.ElementTree.parse(fname).getroot()
+    for row in e.findall('row'):
+        body = row.get(elem)
+        soup = BeautifulSoup(body)
+        text = soup.get_text()
+        for l in nltk.sent_tokenize(text):
+            lines.append(l.replace('\n', ''))
+    return lines
 
 def get_lines():
     with open(args.fname, 'rb') as f:
@@ -40,6 +55,10 @@ if args.run_w2v:
     logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.INFO)
     print 'loading lines...'
     lines = get_lines()
+    if args.process_stackexchange:
+        for d in ['meta.askubuntu.com', 'askubuntu.com']:
+            for fname, elem in [('Posts.xml', 'Body'), ('meta.askubuntu.com/Comments.xml', 'Text')]:
+                lines += get_stackexchange_lines('%s/%s/%s' % (args.stackexchange_dir, d, fname), elem)
     print 'done loading lines: ', len(lines)
     model = gensim.models.Word2Vec(size=args.embedding_size, window=args.window_size, min_count=args.min_count, workers=args.num_workers)
     model.build_vocab(lines)
