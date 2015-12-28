@@ -9,13 +9,14 @@ np.random.seed(42)
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--suffix', type=str, default='', help='Suffix')
+parser.add_argument('--input_dir', type=str, default='../data', help='Input directory')
 parser.add_argument('--output_dir', type=str, default='.', help='Output directory')
 args = parser.parse_args()
 
-TRAIN_FILE = '../data/trainset%s.csv.pkl' % args.suffix
+TRAIN_FILE = '%s/trainset%s.csv.pkl' % (args.input_dir, args.suffix)
 
-VAL_FILE = '../data/valset.csv.pkl'
-TEST_FILE = '../data/testset.csv.pkl'
+VAL_FILE = '%s/valset.csv.pkl' % args.input_dir
+TEST_FILE = '%s/testset.csv.pkl' % args.input_dir
 
 W2V_FILE = '../embeddings/word2vec/GoogleNews-vectors-negative300.bin'
 GLOVE_FILE = '../embeddings/glove/glove.840B.300d.txt'
