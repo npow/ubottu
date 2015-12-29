@@ -57,7 +57,7 @@ if args.run_w2v:
     lines = get_lines()
     if args.process_stackexchange:
         for d in ['meta.askubuntu.com', 'askubuntu.com']:
-            for fname, elem in [('Posts.xml', 'Body'), ('meta.askubuntu.com/Comments.xml', 'Text')]:
+            for fname, elem in [('Posts.xml', 'Body'), ('Comments.xml', 'Text')]:
                 fname = '%s/%s/%s' % (args.stackexchange_dir, d, fname)
                 se_lines = get_stackexchange_lines(fname, elem)
                 print fname, len(se_lines)
