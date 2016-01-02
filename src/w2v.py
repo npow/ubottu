@@ -29,7 +29,7 @@ def get_stackexchange_lines(fname, elem):
     lines = []
     e = xml.etree.ElementTree.parse(fname).getroot()
     for row in e.findall('row'):
-        body = row.get(elem)
+        body = row.get(elem).encode('utf-8')
         soup = BeautifulSoup(body)
         text = soup.get_text()
         for l in nltk.sent_tokenize(text):
