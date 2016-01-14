@@ -16,7 +16,6 @@ from theano.printing import Print as pp
 from lasagne import nonlinearities, init, utils
 from lasagne.layers import Layer, InputLayer, DenseLayer, helper
 sys.setrecursionlimit(10000)
-np.random.seed(42)
 
 class GradClip(theano.compile.ViewOp):
     def __init__(self, clip_lower_bound, clip_upper_bound):
@@ -611,7 +610,9 @@ def main():
   parser.add_argument('--penalize_activations', type='bool', default=False, help='Whether to penalize activations')
   parser.add_argument('--emb_penalty', type=float, default=0.001, help='Embedding penalty')
   parser.add_argument('--act_penalty', type=float, default=500, help='Activation penalty')
+  parser.add_argument('--seed', type=int, default=42, help='Random seed')
   args = parser.parse_args()
+  np.random.seed(args.seed)
 
   print "loading data...",
   if args.use_pv:
