@@ -15,6 +15,7 @@ def process_file(fname, vocab, clean_string=True):
     for i,line in enumerate(csv.reader(open(fname))):
         if i % 10000 == 0:
             print "%s: %d" % (fname, i)
+        assert(len(line) == 3)
         context, response, label = line[0], line[1], line[2]
         tok_context = context.split()
         tok_response = response.split()
