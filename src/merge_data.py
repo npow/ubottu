@@ -5,6 +5,7 @@ import numpy as np
 import random
 import sys
 from collections import Counter
+from twokenize import tokenize
 np.random.seed(42)
 
 parser = argparse.ArgumentParser()
@@ -99,7 +100,7 @@ def get_idx_from_sent(sent, word_idx_map, k):
     Transforms sentence into a list of indices. Pad with zeroes.
     """
     x = []
-    words = sent.split()
+    words = tokenize(sent)
     for word in words:
         if word in word_idx_map:
             x.append(word_idx_map[word])
