@@ -612,6 +612,7 @@ def main():
   parser.add_argument('--act_penalty', type=float, default=500, help='Activation penalty')
   parser.add_argument('--seed', type=int, default=42, help='Random seed')
   args = parser.parse_args()
+  print 'args:', args
   np.random.seed(args.seed)
 
   print "loading data...",
