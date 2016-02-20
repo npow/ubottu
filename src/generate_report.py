@@ -30,7 +30,7 @@ def generate_report(probas, k=5, group_size=10):
         max_idx = np.argmax(batch) + i*test_size
         html = '<table><tr>'
         html += '<td></td>'
-        html += '<td>%s</td></tr>' % '<br/>'.join(to_words(test_data['c'][i*test_size]).split('__EOS__'))
+        html += '<td>%s</td></tr>' % '<br/>'.join(to_words(test_data['c'][i*test_size]).split('__eot__'))
         for j in range(i*test_size, (i+1)*test_size):
             html += '<tr><td>%.2f</td>' % batch[j-i*test_size]
             html += '<td>'
