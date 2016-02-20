@@ -430,6 +430,7 @@ class Model:
         best_val_perf = 0
         best_val_rk1 = 0
         test_perf = 0
+        test_probas = None
         cost_epoch = 0
 
         n_train_batches = len(self.data['train']['y']) // self.batch_size
@@ -478,11 +479,11 @@ class Model:
                     else:
                         break
                 self.update_params()
-        return test_perf
+        return test_perf, test_probas
 
     def compute_recall_ks(self, probas):
       recall_k = {}
-      for group_size in [2, 10]:
+      for group_size in [2, 5, 10]:
           recall_k[group_size] = {}
           print 'group_size: %d' % group_size
           for k in [1, 2, 5]:
@@ -640,9 +641,10 @@ def main():
       sort_by_len(data['train'])
 
   model = Model(**args.__dict__)
-  print model.train(n_epochs=args.n_epochs, shuffle_batch=args.shuffle_batch)
+  _, test_probas = model.train(n_epochs=args.n_epochs, shuffle_batch=args.shuffle_batch)
   if args.save_model:
       cPickle.dump(model, open(args.model_fname, 'wb'))
+      cPickle.dump(test_probas, open('probas_%s' % args.model_fname, 'wb'))
 
 if __name__ == '__main__':
   main()
