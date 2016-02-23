@@ -101,7 +101,7 @@ class Model:
                  n_recurrent_layers=1,
                  is_bidirectional=False,
                  **kwargs):
-        embedding_size = U.shape[1]
+        embedding_size = W.shape[1]
         self.data = data
         self.max_seqlen = max_seqlen
         self.batch_size = batch_size
@@ -117,7 +117,7 @@ class Model:
         self.penalize_emb_norm = penalize_emb_norm
         self.penalize_emb_drift = penalize_emb_drift
         if penalize_emb_drift:
-            self.orig_embeddings = theano.shared(U.copy(), name='orig_embeddings', borrow=True)
+            self.orig_embeddings = theano.shared(W.copy(), name='orig_embeddings', borrow=True)
 
         index = T.iscalar()
         c = T.imatrix('c')
@@ -653,7 +653,7 @@ def main():
   print "data loaded!"
 
   args.data = { 'train' : train_data, 'val': val_data, 'test': test_data }
-  args.U = W.astype(theano.config.floatX)
+  args.W = W.astype(theano.config.floatX)
 
   if args.sort_by_len:
       sort_by_len(data['train'])
