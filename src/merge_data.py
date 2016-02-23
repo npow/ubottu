@@ -5,17 +5,19 @@ import numpy as np
 import random
 import sys
 from collections import Counter
+from twokenize import tokenize
 np.random.seed(42)
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--suffix', type=str, default='', help='Suffix')
+parser.add_argument('--input_dir', type=str, default='../data', help='Input directory')
 parser.add_argument('--output_dir', type=str, default='.', help='Output directory')
 args = parser.parse_args()
 
-TRAIN_FILE = '../data/trainset%s.csv.pkl' % args.suffix
+TRAIN_FILE = '%s/trainset%s.csv.pkl' % (args.input_dir, args.suffix)
 
-VAL_FILE = '../data/valset.csv.pkl'
-TEST_FILE = '../data/testset.csv.pkl'
+VAL_FILE = '%s/valset.csv.pkl' % args.input_dir
+TEST_FILE = '%s/testset.csv.pkl' % args.input_dir
 
 W2V_FILE = '../embeddings/word2vec/GoogleNews-vectors-negative300.bin'
 GLOVE_FILE = '../embeddings/glove/glove.840B.300d.txt'
@@ -98,7 +100,7 @@ def get_idx_from_sent(sent, word_idx_map, k):
     Transforms sentence into a list of indices. Pad with zeroes.
     """
     x = []
-    words = sent.split()
+    words = tokenize(sent)
     for word in words:
         if word in word_idx_map:
             x.append(word_idx_map[word])
@@ -145,7 +147,7 @@ def main():
     print "embeddings loaded!"
     print "num words with embeddings: ", len(embeddings)
 
-    add_unknown_words(embeddings, vocab, min_df=1000)
+    add_unknown_words(embeddings, vocab, min_df=2)
     W, word_idx_map = get_W(embeddings, k=300)
     print "W: ", W.shape
 
@@ -169,7 +171,7 @@ def main():
     del W
 
     rand_vecs = {}
-    add_unknown_words(rand_vecs, vocab, min_df=1000)
+    add_unknown_words(rand_vecs, vocab, min_df=2)
     W2, _ = get_W(rand_vecs, k=300)
     print "W2: ", W2.shape
     cPickle.dump([W2, word_idx_map], open("%s/W2%s.pkl" % (args.output_dir, args.suffix), "wb"), protocol=-1)

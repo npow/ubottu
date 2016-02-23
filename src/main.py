@@ -16,7 +16,6 @@ from theano.printing import Print as pp
 from lasagne import nonlinearities, init, utils
 from lasagne.layers import Layer, InputLayer, DenseLayer, helper
 sys.setrecursionlimit(10000)
-np.random.seed(42)
 
 class GradClip(theano.compile.ViewOp):
     def __init__(self, clip_lower_bound, clip_upper_bound):
@@ -71,12 +70,11 @@ def adam(loss, all_params, learning_rate=0.001, b1=0.9, b2=0.999, e=1e-8,
     updates.append((t, t + 1.))
     return updates
 
-class Model(object):
+class Model:
     def __init__(self,
                  data,
-                 U,
-                 img_h=160,
-                 img_w=300,
+                 W,
+                 max_seqlen=160,
                  hidden_size=100,
                  batch_size=50,
                  lr=0.001,
@@ -84,7 +82,9 @@ class Model(object):
                  sqr_norm_lim=9,
                  fine_tune_W=True,
                  fine_tune_M=False,
+                 use_ntn=False,
                  optimizer='adam',
+                 forget_gate_bias=2,
                  filter_sizes=[3,4,5],
                  num_filters=100,
                  conv_attn=False,
@@ -92,18 +92,32 @@ class Model(object):
                  elemwise_sum=True,
                  corr_penalty=0.0,
                  xcov_penalty=0.0,
+                 penalize_emb_norm=False,
+                 penalize_emb_drift=False,
+                 penalize_activations=False,
+                 emb_penalty=0.001,
+                 act_penalty=500,
+                 k=4,
                  n_recurrent_layers=1,
-                 is_bidirectional=False):
+                 is_bidirectional=False,
+                 **kwargs):
+        embedding_size = W.shape[1]
         self.data = data
-        self.img_h = img_h
+        self.max_seqlen = max_seqlen
         self.batch_size = batch_size
         self.fine_tune_W = fine_tune_W
         self.fine_tune_M = fine_tune_M
+        self.use_ntn = use_ntn
         self.lr = lr
         self.lr_decay = lr_decay
         self.optimizer = optimizer
         self.sqr_norm_lim = sqr_norm_lim
         self.conv_attn = conv_attn
+        self.emb_penalty = emb_penalty
+        self.penalize_emb_norm = penalize_emb_norm
+        self.penalize_emb_drift = penalize_emb_drift
+        if penalize_emb_drift:
+            self.orig_embeddings = theano.shared(W.copy(), name='orig_embeddings', borrow=True)
 
         index = T.iscalar()
         c = T.imatrix('c')
@@ -113,35 +127,41 @@ class Model(object):
         r_mask = T.fmatrix('r_mask')
         c_seqlen = T.ivector('c_seqlen')
         r_seqlen = T.ivector('r_seqlen')
-        embeddings = theano.shared(U, name='embeddings', borrow=True)
+        embeddings = theano.shared(W, name='embeddings', borrow=True)
         zero_vec_tensor = T.fvector()
-        self.zero_vec = np.zeros(img_w, dtype=theano.config.floatX)
+        self.zero_vec = np.zeros(embedding_size, dtype=theano.config.floatX)
         self.set_zero = theano.function([zero_vec_tensor], updates=[(embeddings, T.set_subtensor(embeddings[0,:], zero_vec_tensor))])
         if encoder.find('cnn') > -1 and (encoder.find('rnn') > -1 or encoder.find('lstm') > -1) and not elemwise_sum:
             self.M = theano.shared(np.eye(2*hidden_size).astype(theano.config.floatX), borrow=True)
+        elif use_ntn:
+            self.U = theano.shared(np.random.uniform(-0.01, 0.01, size=(k,)).astype(theano.config.floatX), borrow=True)
+            self.V = theano.shared(np.random.uniform(-0.01, 0.01, size=(k, 2*hidden_size)).astype(theano.config.floatX), borrow=True)
+            self.b = theano.shared(np.random.uniform(-0.01, 0.01, size=(k,)).astype(theano.config.floatX), borrow=True)
+            self.M = theano.shared(np.random.uniform(-0.01, 0.01, size=(k, hidden_size, hidden_size)).astype(theano.config.floatX), borrow=True)
+            self.f = lasagne.nonlinearities.tanh
         else:
             self.M = theano.shared(np.eye(hidden_size).astype(theano.config.floatX), borrow=True)
 
         c_input = embeddings[c.flatten()].reshape((c.shape[0], c.shape[1], embeddings.shape[1]))
         r_input = embeddings[r.flatten()].reshape((r.shape[0], r.shape[1], embeddings.shape[1]))
 
-        l_in = lasagne.layers.InputLayer(shape=(batch_size, img_h, img_w))
+        l_in = lasagne.layers.InputLayer(shape=(batch_size, max_seqlen, embedding_size))
 
         if encoder.find('cnn') > -1:
-            l_conv_in = lasagne.layers.ReshapeLayer(l_in, shape=(batch_size, 1, img_h, img_w))
+            l_conv_in = lasagne.layers.ReshapeLayer(l_in, shape=(batch_size, 1, max_seqlen, embedding_size))
             conv_layers = []
             for filter_size in filter_sizes:
                 conv_layer = lasagne.layers.Conv2DLayer(
                         l_conv_in,
                         num_filters=num_filters,
-                        filter_size=(filter_size, img_w),
+                        filter_size=(filter_size, embedding_size),
                         stride=(1,1),
                         nonlinearity=lasagne.nonlinearities.rectify,
-                        border_mode='valid'
+                        pad='valid'
                         )
                 pool_layer = lasagne.layers.MaxPool2DLayer(
                         conv_layer,
-                        pool_size=(img_h-filter_size+1, 1)
+                        pool_size=(max_seqlen-filter_size+1, 1)
                         )
                 conv_layers.append(pool_layer)
 
@@ -154,12 +174,16 @@ class Model(object):
                 for _ in xrange(n_recurrent_layers):
                     l_fwd = lasagne.layers.LSTMLayer(prev_fwd,
                                                      hidden_size,
+                                                     grad_clipping=10,
+                                                     forgetgate=lasagne.layers.Gate(b=lasagne.init.Constant(forget_gate_bias)),
                                                      backwards=False,
                                                      learn_init=True,
                                                      peepholes=True)
 
                     l_bck = lasagne.layers.LSTMLayer(prev_bck,
                                                      hidden_size,
+                                                     grad_clipping=10,
+                                                     forgetgate=lasagne.layers.Gate(b=lasagne.init.Constant(forget_gate_bias)),
                                                      backwards=True,
                                                      learn_init=True,
                                                      peepholes=True)
@@ -193,9 +217,20 @@ class Model(object):
                 for _ in xrange(n_recurrent_layers):
                     l_recurrent = lasagne.layers.LSTMLayer(prev_fwd,
                                                            hidden_size,
+                                                           grad_clipping=10,
+                                                           forgetgate=lasagne.layers.Gate(b=lasagne.init.Constant(forget_gate_bias)),
                                                            backwards=False,
                                                            learn_init=True,
                                                            peepholes=True)
+                    prev_fwd = l_recurrent
+            elif encoder.find('gru') > -1:
+                for _ in xrange(n_recurrent_layers):
+                    l_recurrent = lasagne.layers.GRULayer(prev_fwd,
+                                                          hidden_size,
+                                                          grad_clipping=10,
+                                                          resetgate=lasagne.layers.Gate(b=lasagne.init.Constant(forget_gate_bias)),
+                                                          backwards=False,
+                                                          learn_init=True)
                     prev_fwd = l_recurrent
             else:
                 for _ in xrange(n_recurrent_layers):
@@ -211,8 +246,8 @@ class Model(object):
 
         recurrent_size = hidden_size * 2 if is_bidirectional else hidden_size
         if conv_attn:
-            l_rconv_in = lasagne.layers.InputLayer(shape=(batch_size, img_h, recurrent_size))
-            l_rconv_in = lasagne.layers.ReshapeLayer(l_rconv_in, shape=(batch_size, 1, img_h, recurrent_size))
+            l_rconv_in = lasagne.layers.InputLayer(shape=(batch_size, max_seqlen, recurrent_size))
+            l_rconv_in = lasagne.layers.ReshapeLayer(l_rconv_in, shape=(batch_size, 1, max_seqlen, recurrent_size))
             conv_layers = []
             for filter_size in filter_sizes:
                 conv_layer = lasagne.layers.Conv2DLayer(
@@ -221,11 +256,11 @@ class Model(object):
                         filter_size=(filter_size, recurrent_size),
                         stride=(1,1),
                         nonlinearity=lasagne.nonlinearities.rectify,
-                        border_mode='valid'
+                        pad='valid'
                         )
                 pool_layer = lasagne.layers.MaxPool2DLayer(
                         conv_layer,
-                        pool_size=(img_h-filter_size+1, 1)
+                        pool_size=(max_seqlen-filter_size+1, 1)
                         )
                 conv_layers.append(pool_layer)
 
@@ -236,8 +271,8 @@ class Model(object):
             l_out = l_recurrent
 
         if conv_attn:
-            e_context = l_recurrent.get_output(c_input, mask=c_mask, deterministic=False)
-            e_response = l_recurrent.get_output(r_input, mask=r_mask, deterministic=False)
+            e_context = lasagne.layers.helper.get_output(l_recurrent, c_input, mask=c_mask, deterministic=False)
+            e_response = lasagne.layers.helper.get_output(l_recurrent, r_input, mask=r_mask, deterministic=False)
             def step_fn(row_t, mask_t):
                 return row_t * mask_t.reshape((-1, 1))
             if is_bidirectional:
@@ -247,15 +282,17 @@ class Model(object):
                 e_context, _ = theano.scan(step_fn, outputs_info=None, sequences=[e_context, c_mask])
                 e_response, _ = theano.scan(step_fn, outputs_info=None, sequences=[e_response, r_mask])
 
-            e_context = l_out.get_output(e_context, mask=c_mask, deterministic=False)
-            e_response = l_out.get_output(e_response, mask=r_mask, deterministic=False)
+            e_context = lasagne.layers.helper.get_output(l_out, e_context, mask=c_mask, deterministic=False)
+            e_response = lasagne.layers.helper.get_output(l_out, e_response, mask=r_mask, deterministic=False)
         else:
-            e_context = l_out.get_output(c_input, mask=c_mask, deterministic=False)[T.arange(batch_size), c_seqlen].reshape((c.shape[0], hidden_size))
-            e_response = l_out.get_output(r_input, mask=r_mask, deterministic=False)[T.arange(batch_size), r_seqlen].reshape((r.shape[0], hidden_size))
+            h_context = lasagne.layers.helper.get_output(l_out, c_input, mask=c_mask, deterministic=False)
+            h_response = lasagne.layers.helper.get_output(l_out, r_input, mask=r_mask, deterministic=False)
+            e_context = h_context[T.arange(batch_size), c_seqlen].reshape((c.shape[0], hidden_size))
+            e_response = h_response[T.arange(batch_size), r_seqlen].reshape((r.shape[0], hidden_size))
 
         if encoder.find('cnn') > -1:
-            e_conv_context = l_conv.get_output(c_input, deterministic=False)
-            e_conv_response = l_conv.get_output(r_input, deterministic=False)
+            e_conv_context = lasagne.layers.helper.get_output(l_conv, c_input, deterministic=False)
+            e_conv_response = lasagne.layers.helper.get_output(l_conv, r_input, deterministic=False)
             if encoder.find('rnn') > -1 or encoder.find('lstm') > -1:
                 if elemwise_sum:
                     e_context = e_context + e_conv_context
@@ -286,16 +323,21 @@ class Model(object):
                 e_context = e_conv_context
                 e_response = e_conv_response
 
-        dp = T.batched_dot(e_context, T.dot(e_response, self.M.T))
+        if use_ntn:
+            dp = T.concatenate([T.batched_dot(e_context, T.dot(e_response, self.M[i])) for i in xrange(k)], axis=1)
+            dp += T.concatenate([e_context, e_response], axis=1).dot(self.V.T) + self.b
+            dp = self.f(dp).dot(self.U)
+        else:
+            dp = T.batched_dot(e_context, T.dot(e_response, self.M.T))
         #dp = pp('dp')(dp)
         o = T.nnet.sigmoid(dp)
         o = T.clip(o, 1e-7, 1.0-1e-7)
 
         self.shared_data = {}
         for key in ['c', 'r']:
-            self.shared_data[key] = theano.shared(np.zeros((batch_size, img_h), dtype=np.int32))
+            self.shared_data[key] = theano.shared(np.zeros((batch_size, max_seqlen), dtype=np.int32))
         for key in ['c_mask', 'r_mask']:
-            self.shared_data[key] = theano.shared(np.zeros((batch_size, img_h), dtype=theano.config.floatX))
+            self.shared_data[key] = theano.shared(np.zeros((batch_size, max_seqlen), dtype=theano.config.floatX))
         for key in ['y', 'c_seqlen', 'r_seqlen']:
             self.shared_data[key] = theano.shared(np.zeros((batch_size,), dtype=np.int32))
 
@@ -303,6 +345,17 @@ class Model(object):
         self.pred = T.argmax(self.probas, axis=1)
         self.errors = T.sum(T.neq(self.pred, y))
         self.cost = T.nnet.binary_crossentropy(o, y).mean()
+
+        if self.penalize_emb_norm:
+            self.cost += self.emb_penalty * (embeddings ** 2).sum()
+
+        if self.penalize_emb_drift:
+            self.cost += self.emb_penalty * ((embeddings - self.orig_embeddings) ** 2).sum()
+
+        if penalize_activations and not conv_attn:
+            self.cost += act_penalty * T.stack([((h_context[:,i] - h_context[:,i+1]) ** 2).sum(axis=1).mean() for i in xrange(max_seqlen-1)]).mean()
+            self.cost += act_penalty * T.stack([((h_response[:,i] - h_response[:,i+1]) ** 2).sum(axis=1).mean() for i in xrange(max_seqlen-1)]).mean()
+
         if encoder.find('cnn') > -1 and (encoder.find('rnn') > -1 or encoder.find('lstm') > -1):
             if abs(corr_penalty) > 0:
                 self.cost += corr_penalty * T.sum(cor)
@@ -323,11 +376,13 @@ class Model(object):
 
     def update_params(self):
         params = lasagne.layers.get_all_params(self.l_out)
+        if self.use_ntn:
+            params += [self.U, self.V, self.M, self.b]
         if self.conv_attn:
             params += lasagne.layers.get_all_params(self.l_recurrent)
         if self.fine_tune_W:
             params += [self.embeddings]
-        if self.fine_tune_M:
+        if self.fine_tune_M and not self.use_ntn:
             params += [self.M]
 
         total_params = sum([p.get_value().size for p in params])
@@ -367,8 +422,8 @@ class Model(object):
         return batch, seqlen, mask
 
     def set_shared_variables(self, dataset, index):
-        c, c_seqlen, c_mask = self.get_batch(dataset['c'], index, self.img_h)
-        r, r_seqlen, r_mask = self.get_batch(dataset['r'], index, self.img_h)
+        c, c_seqlen, c_mask = self.get_batch(dataset['c'], index, self.max_seqlen)
+        r, r_seqlen, r_mask = self.get_batch(dataset['r'], index, self.max_seqlen)
         y = np.array(dataset['y'][index*self.batch_size:(index+1)*self.batch_size], dtype=np.int32)
         self.shared_data['c'].set_value(c)
         self.shared_data['r'].set_value(r)
@@ -391,6 +446,7 @@ class Model(object):
         best_val_perf = 0
         best_val_rk1 = 0
         test_perf = 0
+        test_probas = None
         cost_epoch = 0
 
         n_train_batches = len(self.data['train']['y']) // self.batch_size
@@ -439,11 +495,11 @@ class Model(object):
                     else:
                         break
                 self.update_params()
-        return test_perf
+        return test_perf, test_probas
 
     def compute_recall_ks(self, probas):
       recall_k = {}
-      for group_size in [2, 10]:
+      for group_size in [2, 5, 10]:
           recall_k[group_size] = {}
           print 'group_size: %d' % group_size
           for k in [1, 2, 5]:
@@ -527,6 +583,13 @@ def load_pv_vecs(fname, ndims):
             X[i+1] = np.array(L[1:], dtype='float32')
         return X
 
+def sort_by_len(dataset):
+    c, r, y = dataset['c'], dataset['r'], dataset['y']
+    indices = range(len(y))
+    indices.sort(key=lambda i: len(c[i]))
+    for k in ['c', 'r', 'y']:
+        dataset[k] = np.array(dataset[k])[indices]
+
 def str2bool(v):
   return v.lower() in ("yes", "true", "t", "1")
 
@@ -546,7 +609,7 @@ def main():
   parser.add_argument('--sqr_norm_lim', type=float, default=1, help='Squared norm limit')
   parser.add_argument('--lr', type=float, default=0.001, help='Learning rate')
   parser.add_argument('--optimizer', type=str, default='adam', help='Optimizer')
-  parser.add_argument('--suffix', type=str, default='', help='Suffix for pkl files')
+  parser.add_argument('--forget_gate_bias', type=float, default=2.0, help='Forget gate bias')
   parser.add_argument('--use_pv', type='bool', default=False, help='Use PV')
   parser.add_argument('--pv_ndims', type=int, default=100, help='PV ndims')
   parser.add_argument('--max_seqlen', type=int, default=160, help='Max seqlen')
@@ -556,8 +619,20 @@ def main():
   parser.add_argument('--input_dir', type=str, default='.', help='Input dir')
   parser.add_argument('--save_model', type='bool', default=False, help='Whether to save the model')
   parser.add_argument('--model_fname', type=str, default='model.pkl', help='Model filename')
+  parser.add_argument('--dataset_fname', type=str, default='dataset.pkl', help='Dataset filename')
+  parser.add_argument('--W_fname', type=str, default='W.pkl', help='W filename')
+  parser.add_argument('--sort_by_len', type='bool', default=False, help='Whether to sort contexts by length')
+  parser.add_argument('--penalize_emb_norm', type='bool', default=False, help='Whether to penalize norm of embeddings')
+  parser.add_argument('--penalize_emb_drift', type='bool', default=False, help='Whether to use re-embedding words penalty')
+  parser.add_argument('--penalize_activations', type='bool', default=False, help='Whether to penalize activations')
+  parser.add_argument('--emb_penalty', type=float, default=0.001, help='Embedding penalty')
+  parser.add_argument('--act_penalty', type=float, default=500, help='Activation penalty')
+  parser.add_argument('--use_ntn', type='bool', default=False, help='Whether to use NTN')
+  parser.add_argument('--k', type=int, default=4, help='Size of k in NTN')
+  parser.add_argument('--seed', type=int, default=42, help='Random seed')
   args = parser.parse_args()
-  print "args: ", args
+  print 'args:', args
+  np.random.seed(args.seed)
 
   print "loading data...",
   if args.use_pv:
@@ -573,34 +648,22 @@ def main():
       W = load_pv_vecs('../data/pv_vectors_%dd.txt' % args.pv_ndims, args.pv_ndims)
       args.max_seqlen = 21
   else:
-      train_data, val_data, test_data = cPickle.load(open('%s/dataset%s.pkl' % (args.input_dir, args.suffix), 'rb'))
-      W, _ = cPickle.load(open('%s/W%s.pkl' % (args.input_dir, args.suffix), 'rb'))
+      train_data, val_data, test_data = cPickle.load(open('%s/%s' % (args.input_dir, args.dataset_fname), 'rb'))
+      W, _ = cPickle.load(open('%s/%s' % (args.input_dir, args.W_fname), 'rb'))
   print "data loaded!"
 
-  data = { 'train' : train_data, 'val': val_data, 'test': test_data }
+  args.data = { 'train' : train_data, 'val': val_data, 'test': test_data }
+  args.W = W.astype(theano.config.floatX)
 
-  model = Model(data,
-                W.astype(theano.config.floatX),
-                img_h=args.max_seqlen,
-                img_w=W.shape[1],
-                hidden_size=args.hidden_size,
-                batch_size=args.batch_size,
-                lr=args.lr,
-                lr_decay=args.lr_decay,
-                sqr_norm_lim=args.sqr_norm_lim,
-                fine_tune_W=args.fine_tune_W,
-                fine_tune_M=args.fine_tune_M,
-                optimizer=args.optimizer,
-                encoder=args.encoder,
-                is_bidirectional=args.is_bidirectional,
-                corr_penalty=args.corr_penalty,
-                xcov_penalty=args.xcov_penalty,
-                n_recurrent_layers=args.n_recurrent_layers,
-                conv_attn=args.conv_attn)
+  if args.sort_by_len:
+      sort_by_len(data['train'])
 
-  print model.train(n_epochs=args.n_epochs, shuffle_batch=args.shuffle_batch)
+  model = Model(**args.__dict__)
+  _, test_probas = model.train(n_epochs=args.n_epochs, shuffle_batch=args.shuffle_batch)
+
   if args.save_model:
       cPickle.dump(model, open(args.model_fname, 'wb'))
+      cPickle.dump(test_probas, open('probas_%s' % args.model_fname, 'wb'))
 
 if __name__ == '__main__':
   main()
