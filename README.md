@@ -13,7 +13,7 @@ The Ubuntu Dialogue Corpus: A Large Dataset for Research in Unstructured Multi-T
 Fetch the pickled data:
 ```
 cd src
-wget http://cs.mcgill.ca/~npow1/data/ubuntu_blobs.tgz
+wget http://dataset.cs.mcgill.ca/ubuntu-corpus-1.0/ubuntu_blobs.tgz
 tar zxvf blobs.tgz
 ```
 
